@@ -1,0 +1,114 @@
+server:
+  port: 8091
+
+# 线程池配置
+thread:
+  pool:
+    executor:
+      config:
+        core-pool-size: 20
+        max-pool-size: 50
+        keep-alive-time: 5000
+        block-queue-size: 5000
+        policy: CallerRunsPolicy
+
+# 数据库配置；启动时配置数据库资源信息
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://223.109.141.184:5432/agent_platform}
+    username: ${DB_USERNAME:agent_platform}
+    password: ${DB_PASSWORD:agent_platform_dev}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:223.109.141.184}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+  mvc:
+    async:
+      request-timeout: 10m
+  config:
+    import:
+#      - classpath:agent/test-agent-02.yml
+#      - classpath:agent/test-agent.yml
+#       - classpath:agent/only-one-agent.yml
+       - classpath:agent/agent-draw-io.yml
+       - classpath:agent/agent-ppt.yml
+       - classpath:agent/agent-general.yml
+
+ai:
+  agent:
+    persistence:
+      mode: ${AGENT_PERSISTENCE_MODE:postgres}
+      root: ${AGENT_PERSISTENCE_ROOT:${user.dir}/data/agent-runtime}
+    chat:
+      # false：ADK 等模型完成后返回最终 Event；NDJSON 仍用于状态、Tool、审批和最终结果传输。
+      streaming-enabled: ${AGENT_STREAMING_ENABLED:false}
+      execution-timeout-ms: ${AGENT_EXECUTION_TIMEOUT_MS:900000}
+    model-routing:
+      enabled: ${MODEL_ROUTING_ENABLED:true}
+      # 留空表示该档位继续使用 Agent 默认模型；显式前端模型永远优先。
+      fast-model: ${MODEL_FAST:}
+      balanced-model: ${MODEL_BALANCED:}
+      reasoning-model: ${MODEL_REASONING:}
+    tool-governance:
+      timeout-ms: ${TOOL_TIMEOUT_MS:120000}
+      failure-threshold: ${TOOL_FAILURE_THRESHOLD:3}
+      cooldown-ms: ${TOOL_COOLDOWN_MS:60000}
+      max-retries: ${TOOL_MAX_RETRIES:2}
+      retry-backoff-ms: ${TOOL_RETRY_BACKOFF_MS:500}
+      max-concurrency: ${TOOL_MAX_CONCURRENCY:8}
+      max-result-bytes: ${TOOL_MAX_RESULT_BYTES:131072}
+    subagent:
+      max-task-chars: ${SUBAGENT_MAX_TASK_CHARS:65536}
+      max-depth: ${SUBAGENT_MAX_DEPTH:3}
+      max-tasks-per-invocation: ${SUBAGENT_MAX_TASKS:8}
+      max-concurrency: ${SUBAGENT_MAX_CONCURRENCY:4}
+      total-token-budget: ${SUBAGENT_TOTAL_TOKEN_BUDGET:200000}
+    recovery:
+      heartbeat-ms: ${AGENT_RECOVERY_HEARTBEAT_MS:10000}
+      scan-ms: ${AGENT_RECOVERY_SCAN_MS:15000}
+      stale-ms: ${AGENT_RECOVERY_STALE_MS:60000}
+      invocation-timeout-ms: ${AGENT_INVOCATION_TIMEOUT_MS:900000}
+      tool-timeout-ms: ${AGENT_TOOL_TIMEOUT_MS:300000}
+      worker-concurrency: ${AGENT_RECOVERY_WORKER_CONCURRENCY:2}
+      max-attempts: ${AGENT_RECOVERY_MAX_ATTEMPTS:3}
+      dispatch-ms: ${AGENT_RECOVERY_DISPATCH_MS:3000}
+    model-pricing:
+      # 未配置时费用显示“未配置单价”，不会生成伪精确金额。
+      input-per-million: ${MODEL_INPUT_PRICE_PER_MILLION:0}
+      output-per-million: ${MODEL_OUTPUT_PRICE_PER_MILLION:0}
+    auth:
+      jwt-secret: ${JWT_SECRET:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08}
+      access-token-seconds: ${JWT_ACCESS_TOKEN_SECONDS:1800}
+      refresh-token-seconds: ${JWT_REFRESH_TOKEN_SECONDS:2592000}
+#  datasource:
+#    username: root
+#    password: 123456
+#    url: jdbc:mysql://127.0.0.1:3306/xfg_frame_archetype?useUnicode=true&characterEncoding=utf8&autoReconnect=true&zeroDateTimeBehavior=convertToNull&serverTimezone=UTC&useSSL=true
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+#  hikari:
+#    pool-name: Retail_HikariCP
+#    minimum-idle: 15 #最小空闲连接数量
+#    idle-timeout: 180000 #空闲连接存活最大时间，默认600000（10分钟）
+#    maximum-pool-size: 25 #连接池最大连接数，默认是10
+#    auto-commit: true  #此属性控制从池返回的连接的默认自动提交行为,默认值：true
+#    max-lifetime: 1800000 #此属性控制池中连接的最长生命周期，值0表示无限生命周期，默认1800000即30分钟
+#    connection-timeout: 30000 #数据库连接超时时间,默认30秒，即30000
+#    connection-test-query: SELECT 1
+#  type: com.zaxxer.hikari.HikariDataSource
+
+# MyBatis 配置【如需使用记得打开】
+#mybatis:
+#  mapper-locations: classpath:/mybatis/mapper/*.xml
+#  config-location:  classpath:/mybatis/config/mybatis-config.xml
+
+# 日志
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml

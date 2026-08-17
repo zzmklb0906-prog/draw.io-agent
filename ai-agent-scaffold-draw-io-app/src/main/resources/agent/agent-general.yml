@@ -1,0 +1,56 @@
+ai:
+  agent:
+    config:
+      tables:
+        generalAgent:
+          app-name: generalAgent
+          agent:
+            agent-id: 300002
+            agent-name: 通用任务智能体
+            agent-desc: 面向分析、写作、知识处理与多领域任务的通用 Agent，可按需检索并执行运行时能力。
+          module:
+            ai-api:
+              base-url: https://api.deepseek.com
+              api-key: ${DEEPSEEK_API_KEY:}
+              completions-path: chat/completions
+              embeddings-path: embeddings
+            chat-model:
+              model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+              tool-skills-list:
+                - name: general-skills
+                  type: resource
+                  path: agent/skills
+                  included-skills:
+                    - drawio
+                    - ppt
+                    - pdf
+            agents:
+              - name: general_orchestrator
+                tools:
+                  - dynamic-subagent
+                capability-groups:
+                  - general-skills
+                description: 分析并完成通用任务；只有任务确实需要外部能力时才从运行时注册表按需选择能力。
+                instruction: |
+                  你是一个通用任务 Agent。直接解决用户问题，并以准确、清晰、可验证的结果为目标。
+
+                  工作原则：
+                  - 先判断任务是否仅凭当前对话即可完成；可以直接完成时，不调用工具。
+                  - 需要专业规范、文件处理或其他外部能力时，先用 search_capabilities 描述所需能力并检索 Top-K。
+                  - 只对最相关的候选调用 load_capability；确认输入协议后才调用 execute_capability。
+                  - 不猜测不存在的工具，不枚举整个能力库，不为展示能力而调用工具。
+                  - 工具结果是证据而不是最终答案；应检查错误、缺失信息与适用范围，再形成答复。
+                  - 涉及副作用或非只读能力时，等待系统的人机确认，不得绕过审批。
+                  - 当任务包含两个以上可独立完成的专业子任务，或需要独立审查时，先调用 list_subagent_templates，再用 spawn_subagent 创建边界清晰的动态 Subagent；可连续创建多个任务后再逐个 await_subagent 汇总。简单任务不要创建 Subagent。
+                  - 不输出内部思维链；可以简洁说明结论、证据、执行结果和未确认项。
+
+                  对复杂任务，先在内部拆解目标、约束与完成标准，再逐项执行。信息不足且会实质改变结果时，明确提出最少量的澄清问题。
+            runner:
+              agent-name: general_orchestrator
+              plugin-name-list:
+                - customConfigPlugin
+                - lightweightMonitoringPlugin
+                - contextCompressionPlugin
+              compaction-enabled: true
+              compaction-token-threshold: 89600
+              compaction-event-retention-size: 12

@@ -1,0 +1,10 @@
+import { request } from '../../shared/api/httpClient';
+import type { EvalDataset, EvalRun } from './eval.types';
+export const queryEvalDatasets=()=>request<EvalDataset[]>('/api/v1/eval/datasets');
+export const queryEvalDataset=(id:string)=>request<EvalDataset>(`/api/v1/eval/datasets/${encodeURIComponent(id)}`);
+export const createEvalDataset=(body:{key:string;name:string;description:string})=>request<{datasetId:string}>('/api/v1/eval/datasets',{method:'POST',body:JSON.stringify(body)});
+export const createEvalCase=(datasetId:string,body:Record<string,unknown>)=>request<{caseId:string}>(`/api/v1/eval/datasets/${encodeURIComponent(datasetId)}/cases`,{method:'POST',body:JSON.stringify(body)});
+export const queryEvalRuns=(datasetId?:string)=>request<EvalRun[]>(`/api/v1/eval/runs${datasetId?`?datasetId=${encodeURIComponent(datasetId)}`:''}`);
+export const queryEvalRun=(id:string)=>request<EvalRun>(`/api/v1/eval/runs/${encodeURIComponent(id)}`);
+export const startEvalRun=(body:{datasetId:string;candidateLabel:string;repeats:number;baselineRunId?:string})=>request<{runId:string;status:string}>('/api/v1/eval/runs',{method:'POST',body:JSON.stringify(body)});
+export const setEvalBaseline=(datasetId:string,runId:string)=>request<{updated:boolean}>(`/api/v1/eval/datasets/${encodeURIComponent(datasetId)}/baseline/${encodeURIComponent(runId)}`,{method:'POST'});

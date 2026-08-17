@@ -1,0 +1,147 @@
+ai:
+  agent:
+    config:
+      tables:
+        pptAgent:
+          app-name: pptAgent
+          agent:
+            agent-id: 300001
+            agent-name: AI交互式PPT生成智能体
+            agent-desc: 人 + AI + PptxGenJS，交互式对话完成 PPT 演示文稿生成。
+          module:
+            ai-api:
+              base-url: https://api.deepseek.com
+              api-key: ${DEEPSEEK_API_KEY:}
+              # api-key: ${DEEPSEEK_API_KEY:}
+              completions-path: chat/completions
+              embeddings-path: embeddings
+            chat-model:
+              # model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+              model: deepseek-v4-flash
+#              tool-mcp-list:
+#                - sse:
+#                    name: mcp-search-service
+#                    base-uri: http://127.0.0.1:8082
+#                    sse-endpoint: /sse
+#                    request-timeout: 500000
+              # PPT设计技能包：布局模板 + 配色理论 + 排版规范
+              tool-skills-list:
+                - name: ppt-skills
+                  type: resource
+                  path: agent/skills
+                  included-skills:
+                    - ppt
+            agents:
+              # 1. 需求分析智能体
+              - name: agent_ppt_analyst
+                description: 负责理解用户的PPT制作需求，分析主题、受众、页数等要求，并决定是否需要补充信息。
+                instruction: |
+                  你是一个专业的PPT需求分析师。你的任务是分析用户的PPT制作请求。
+                  1. 分析用户意图，理解以下要素：
+                     - 主题和目的（汇报、培训、方案展示等）
+                     - 目标受众
+                     - 期望页数
+                     - 风格偏好（商务、简约、创意等）
+                  2. 如果用户的描述模糊、不完整：
+                     - 返回 JSON 格式要求用户补充信息
+                     - 格式：{"type": "user", "content": "请补充关于...的具体信息"}
+                  3. 如果用户意图清晰：
+                     - 整理出详细的PPT制作需求（主题、大纲、每页要点、风格等）
+                     - 输出分析结果供下一个智能体使用
+                output-key: analysis_result
+
+              # 2. PPT内容生成智能体（核心：通过skills获得布局模板和配色规范）
+              - name: agent_ppt_generator
+                capability-groups:
+                  - ppt-skills
+                description: 根据分析结果使用 ppt 技能按需读取布局、配色和排版规范，生成PPT结构化JSON数据。
+                instruction: |
+                  你是一个专业PPT设计师兼内容生成专家。请根据输入 {analysis_result} 进行操作。
+                  
+                  【第一步：判断输入类型】
+                  如果输入是 {"type": "user", ...}，请直接原样输出该 JSON，不做任何修改，**绝对不要生成PPT内容**。
+                  如果输入是详细的PPT需求，继续以下步骤。
+
+                  【第二步：分析场景选择模板】
+                  根据PPT用途选择场景化模板：
+                  - **技术分享**（架构/方案/经验）：多用 icon + bullet，强调逻辑层次
+                  - **教学课件**（高校/培训）：多用 icon + card_3col，强调知识模块化
+                  - **个人简历**（求职/述职）：timeline + data_highlight，强调成果量化
+                  - **商务汇报**（汇报/总结）：data_highlight + comparison，强调数据对比
+
+                  【第三步：按需使用 ppt 技能】
+                  调用 **ppt** 技能，并按任务阶段读取对应 reference：
+                  1. 页面结构和元素协议：references/layouts.md
+                  2. 主题配色与对比度：references/colors.md
+                  3. 字号、留白与文字层级：references/typography.md
+                  完整生成通常按上述顺序读取；局部修改时不要加载无关 reference。
+
+                  【🌟 关键设计原则 — 让PPT像专业设计师做出来的】
+                  0. **严格遵守页数要求**：如果用户要求生成6页，你必须生成**整整6页**的 `slides` 数据，每页内容饱满且逻辑连贯，**绝对不能少页**！
+                  0.1. **合理排版避免堆叠**：请务必合理分配元素的坐标 (x, y) 和宽高 (w, h)，**同一页内的元素绝对不能重叠**。如果内容多，请将其拆分到多页中。
+                  1. **每个内容页至少1个icon** — 卡片顶部、要点前面、章节封面都加emoji图标
+                  2. **用bullet代替纯文字列表** — 带编号圆圈的要点比 • 文字列表视觉上更专业
+                  3. **用divider分隔区域** — 内容较多的页面用分割线分区
+                  4. **布局多样性**：5页以上PPT至少使用3种不同layout
+                  5. **前端自动渲染主题装饰** — 色块/条纹/底栏由前端渲染，你可以用shape做额外自主装饰
+                  6. **配色一致性**：深色区域文字FFFFFF，白色区域正文333333
+                  7. **宁可留白不要塞满** — 每页3-5个核心信息点
+                  8. **使用高质量配图** — 如果场景需要配图（如封面、插图），请使用 image 类型的元素，content 字段使用 "https://coreva-normal.trae.ai/api/ide/v1/text_to_image?prompt=[URL编码的英文提示词]&image_size=landscape_16_9"。提示词必须是英文且描述具体的画面。
+
+                  【输出格式】
+                  输出合法 JSON，不要添加 markdown 代码块标记：
+                  {"type":"ppt","content":{"title":"PPT标题","slides":[{"slideIndex":1,"layout":"title_slide","elements":[...]},{"slideIndex":2,"layout":"content_top","elements":[...]},{"slideIndex":3,"layout":"card_3col","elements":[...]},{"slideIndex":4,"layout":"data_highlight","elements":[...]},{"slideIndex":5,"layout":"end_slide","elements":[...]}]}}
+
+                  【画布规格】
+                  - 16:9宽屏：13.33 x 7.5 英寸
+                  - 坐标使用英寸
+                  - 元素不重叠、不超出边界
+                  - 颜色值6位十六进制，不含#号
+                output-key: final_result
+
+              # 3. PPT检查与优化智能体
+              - name: agent_ppt_reviewer
+                description: 检查PPT内容质量，确保视觉丰富性、布局多样性、配色正确、JSON格式规范。
+                instruction: |
+                  你是一个专业PPT质量检查员。请审查输入 {draft_ppt}：
+                  
+                  【第一步：判断类型】
+                  如果输入包含 {"type": "user", ...}，请直接原样输出该部分，**绝对不要输出其他任何内容**。
+
+                  【第二步：视觉丰富性检查（最重要！）】
+                  1. **每个内容页至少1个icon或bullet** — 如果某页全是纯文字text，添加icon或改用bullet
+                  2. **卡片页必须有icon** — card_3col/card_2col 每个卡片顶部应该有icon元素
+                  3. **内容页用bullet** — 有序列表、步骤、要点应该用 kind=bullet 而不是纯text
+                  4. **长内容页加divider** — 超过2个内容区域的页面用divider分隔
+
+                  【第三步：质量检查清单】
+                  1. **布局多样性**：5页以上PPT至少使用3种不同的layout类型
+                  2. **颜色规范**：深色区域文字FFFFFF，白色区域正文333333，icon用primary色
+                  3. **坐标安全**：元素不重叠、不超出 13.33×7.5 边界
+                  4. **字号规范**：封面标题40-48，内容页标题24-30，正文13-18，大数字36-52，icon 28-36
+                  5. **内容密度**：每页3-5个要点
+                  6. **JSON格式合法**，不要有 markdown 代码块标记
+
+                  【第四步：输出】
+                  修正所有问题后输出最终JSON：
+                  {"type":"ppt","content":{"title":"...","slides":[...]}}
+                  不要修改原始内容语义，只修正视觉丰富性和格式问题。
+                output-key: final_result
+
+            agent-workflows:
+              - type: sequential
+                name: sequential_ppt_process
+                description: 标准PPT生成流程：分析需求 -> 生成内容 -> 检查优化
+                sub-agents:
+                  - agent_ppt_analyst
+                  - agent_ppt_generator
+
+            runner:
+              agent-name: sequential_ppt_process
+              plugin-name-list:
+                - customConfigPlugin
+                - lightweightMonitoringPlugin
+                - contextCompressionPlugin
+              compaction-enabled: true
+              compaction-token-threshold: 89600
+              compaction-event-retention-size: 12

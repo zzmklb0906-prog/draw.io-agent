@@ -1,0 +1,42 @@
+# IDE & Editor
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Java / Maven build output
+target/
+**/target/
+
+# Node.js / Front-end build & dependencies
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker exported images
+*.tar
+*.tar.gz
+
+# Environment / Local Config
+.env
+.env.local
+*.log
+
+# Runtime Data & Logs
+data/agent-runtime/*
+!data/agent-runtime/.gitkeep
+data/log/*
+!data/log/.gitkeep
+
+# Temporary / Agent cache
+.codex-smoke/
+
+# OS generated files
+.DS_Store
+Thumbs.db
