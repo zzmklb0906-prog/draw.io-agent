@@ -46,16 +46,16 @@ export function ModelRoutingTrace({ decisions }: ModelRoutingTraceProps) {
               <div className="routing-card-meta">
                 <span className="routing-time">{timeStr}</span>
                 <span className="routing-reason-preview">{item.reason}</span>
-                <button className="button tiny outline">{isExpanded ? '收起思考' : '开箱详情'}</button>
+                <button className="button tiny outline">{isExpanded ? '收起依据' : '展开路由依据'}</button>
               </div>
             </div>
 
-            {/* 白话推导与思考过程 */}
+            {/* 路由决策摘要 */}
             {item.narrative && (
               <div className="routing-narrative">
                 <div className="narrative-title">
-                  <span className="narrative-icon">💡</span>
-                  <b>决策思考与推导 (Decision Narrative)</b>
+                  <span className="narrative-icon">📋</span>
+                  <b>路由决策摘要 (Routing Decision Summary)</b>
                 </div>
                 <p className="narrative-content">{item.narrative}</p>
               </div>
@@ -64,12 +64,25 @@ export function ModelRoutingTrace({ decisions }: ModelRoutingTraceProps) {
             {/* 展开的量化指标与决策链 */}
             {isExpanded && (
               <div className="routing-card-body">
-                {/* 真实量化指标打分 */}
+                {/* 路由量化特征 */}
                 <div className="routing-metrics-grid">
-                  {typeof metrics.textLength === 'number' && (
+                  {typeof metrics.latestUserTextLength === 'number' && (
                     <div className="metric-item">
-                      <span className="metric-label">请求文本总长</span>
+                      <span className="metric-label">当前用户消息长度</span>
+                      <strong className="metric-val">{metrics.latestUserTextLength.toLocaleString()} 字符</strong>
+                    </div>
+                  )}
+                  {/* Fallback for legacy textLength key */}
+                  {typeof metrics.latestUserTextLength !== 'number' && typeof metrics.textLength === 'number' && (
+                    <div className="metric-item">
+                      <span className="metric-label">请求文本长度</span>
                       <strong className="metric-val">{metrics.textLength.toLocaleString()} 字符</strong>
+                    </div>
+                  )}
+                  {typeof metrics.totalContextChars === 'number' && (
+                    <div className="metric-item">
+                      <span className="metric-label">上下文总长度</span>
+                      <strong className="metric-val">{metrics.totalContextChars.toLocaleString()} 字符</strong>
                     </div>
                   )}
                   {reasoningScore !== undefined && (
@@ -94,10 +107,10 @@ export function ModelRoutingTrace({ decisions }: ModelRoutingTraceProps) {
                   )}
                 </div>
 
-                {/* 真实命中的关键词画像 */}
+                {/* 匹配特征词 */}
                 {item.matchedKeywords && item.matchedKeywords.length > 0 && (
                   <div className="routing-keywords-box">
-                    <span className="box-title">🎯 真实命中特征词画像 (Matched Keywords):</span>
+                    <span className="box-title">🎯 匹配特征词 (Matched Keywords):</span>
                     <div className="keyword-tags">
                       {item.matchedKeywords.map((kw, kwIdx) => (
                         <span key={kwIdx} className="keyword-tag">{kw}</span>
@@ -106,10 +119,10 @@ export function ModelRoutingTrace({ decisions }: ModelRoutingTraceProps) {
                   </div>
                 )}
 
-                {/* 真实决策流水线决策链 */}
+                {/* 决策流水线 */}
                 {item.pipelineTrail && item.pipelineTrail.length > 0 && (
                   <div className="routing-pipeline-box">
-                    <span className="box-title">🛣️ 决策流水线判定链 (Pipeline Trail):</span>
+                    <span className="box-title">🛣️ 决策流水线 (Routing Pipeline):</span>
                     <div className="pipeline-steps">
                       {item.pipelineTrail.map((step, sIdx) => (
                         <div key={sIdx} className={`pipeline-step ${step.status.toLowerCase()}`}>
