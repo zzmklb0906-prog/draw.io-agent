@@ -53,12 +53,17 @@ public class LightweightMonitorService {
     }
 
     public synchronized void runStarted(String invocationId, String sessionId, String userId, String rootAgent, String appName) {
-        records.computeIfAbsent(invocationId, id -> {
-            order.addFirst(id);
+        InvocationRecord record = records.get(invocationId);
+        if (record == null) {
+            order.addFirst(invocationId);
             while (order.size() > MAX_INVOCATIONS) records.remove(order.removeLast());
-            return new InvocationRecord(id, sessionId, userId, rootAgent);
-        });
-        persist(()->persistence.invocationStarted(invocationId,sessionId,userId,rootAgent,appName,records.get(invocationId).startedAt));
+            record = new InvocationRecord(invocationId, sessionId, userId, rootAgent, appName);
+            records.put(invocationId, record);
+        } else if ("unknown".equalsIgnoreCase(record.rootAgent) && rootAgent != null && !"unknown".equalsIgnoreCase(rootAgent)) {
+            record.updateMetadata(sessionId, userId, rootAgent, appName);
+        }
+        InvocationRecord finalRecord = record;
+        persist(() -> persistence.invocationStarted(invocationId, sessionId, userId, rootAgent, appName, finalRecord.startedAt));
     }
 
     public void versionSnapshot(String invocationId,Map<String,Object> snapshot){if(snapshot==null||snapshot.isEmpty())return;persist(()->persistence.invocationVersionSnapshot(invocationId,snapshot));}
@@ -120,7 +125,8 @@ public class LightweightMonitorService {
         AgentRecord agent = ensure(invocationId).agents.computeIfAbsent(agentName, AgentRecord::new);
         agent.modelStartedAt.set(System.currentTimeMillis());
         agent.modelCalls.incrementAndGet();
-        persist(()->persistence.modelStarted(invocationId,runId,agentName,agent.modelStartedAt.get(),agent.inputTokens.get()));
+        String actualModel = (agent.lastRoutedModel != null && !agent.lastRoutedModel.isBlank()) ? agent.lastRoutedModel : agentName;
+        persist(()->persistence.modelStarted(invocationId,runId,agentName,actualModel,agent.modelStartedAt.get(),agent.inputTokens.get()));
     }
 
     public void modelCompleted(String invocationId, String agentName) {
@@ -149,16 +155,33 @@ public class LightweightMonitorService {
     }
 
     public void modelRouted(String invocationId, String agentName, String model, String reason, int complexity, boolean explicit) {
+        modelRouted(invocationId, agentName, model, reason, complexity, explicit, "", Map.of(), List.of(), List.of());
+    }
+
+    public void modelRouted(String invocationId, String agentName, String model, String reason, int complexity, boolean explicit,
+                            String narrative, Map<String, Object> metrics, List<String> matchedKeywords, List<Map<String, Object>> pipelineTrail) {
         if (invocationId == null || invocationId.isBlank()) return;
         InvocationRecord record = ensure(invocationId);
-        record.modelDecisions.add(Map.of(
-                "agentName", agentName == null ? "unknown" : agentName,
-                "model", model == null ? "" : model,
-                "reason", reason == null ? "" : reason,
-                "complexity", complexity,
-                "explicit", explicit,
-                "timestamp", System.currentTimeMillis()));
-        String selected=model==null?"":model;persist(()->persistence.invocationModelVersion(invocationId,selected,InvocationVersionCatalog.fingerprint(selected)));runtimeEvent(invocationId,"MODEL_ROUTED",Map.of("agentName",agentName==null?"unknown":agentName,"model",selected,"reason",reason==null?"":reason,"complexity",complexity,"explicit",explicit));
+        String targetAgent = (agentName == null || agentName.isBlank()) ? "unknown" : agentName;
+        AgentRecord agent = record.agents.computeIfAbsent(targetAgent, AgentRecord::new);
+        if (model != null && !model.isBlank()) agent.lastRoutedModel = model;
+
+        Map<String, Object> decisionMap = new LinkedHashMap<>();
+        decisionMap.put("agentName", targetAgent);
+        decisionMap.put("model", model == null ? "" : model);
+        decisionMap.put("reason", reason == null ? "" : reason);
+        decisionMap.put("complexity", complexity);
+        decisionMap.put("explicit", explicit);
+        decisionMap.put("narrative", narrative == null ? "" : narrative);
+        decisionMap.put("metrics", metrics == null ? Map.of() : metrics);
+        decisionMap.put("matchedKeywords", matchedKeywords == null ? List.of() : matchedKeywords);
+        decisionMap.put("pipelineTrail", pipelineTrail == null ? List.of() : pipelineTrail);
+        decisionMap.put("timestamp", System.currentTimeMillis());
+
+        record.modelDecisions.add(decisionMap);
+        String selected=model==null?"":model;
+        persist(()->persistence.invocationModelVersion(invocationId,selected,InvocationVersionCatalog.fingerprint(selected)));
+        runtimeEvent(invocationId,"MODEL_ROUTED",decisionMap);
     }
 
     public void usage(String invocationId, String agentName, int input, int output, int total) {
@@ -325,7 +348,8 @@ public class LightweightMonitorService {
     private static String redactText(String value){if(value==null)return "";return value.replaceAll("(?i)(password|passwd|secret|token|api[_-]?key|authorization|cookie)(\\s*[:=]\\s*)[^,}\\s]+","$1$2***");}
 
     private static final class InvocationRecord {
-        final String invocationId, sessionId, userId, rootAgent;
+        final String invocationId;
+        volatile String sessionId, userId, rootAgent, workflowName;
         final long startedAt = System.currentTimeMillis();
         volatile long completedAt;
         volatile String status = "RUNNING", error = "";
@@ -336,12 +360,22 @@ public class LightweightMonitorService {
         final List<Map<String, Object>> compressions = Collections.synchronizedList(new ArrayList<>());
         final List<Map<String, Object>> modelDecisions = Collections.synchronizedList(new ArrayList<>());
         final List<Map<String, Object>> capabilityEvents = Collections.synchronizedList(new ArrayList<>());
-        InvocationRecord(String id, String session, String user, String root) { invocationId=id; sessionId=session; userId=user; rootAgent=root; }
+        InvocationRecord(String id, String session, String user, String root) { this(id, session, user, root, root); }
+        InvocationRecord(String id, String session, String user, String root, String appName) {
+            invocationId = id; sessionId = session; userId = user; rootAgent = root; workflowName = (appName == null || appName.isBlank()) ? root : appName;
+        }
+        void updateMetadata(String session, String user, String root, String appName) {
+            if (session != null && !session.isBlank()) this.sessionId = session;
+            if (user != null && !user.isBlank()) this.userId = user;
+            if (root != null && !root.isBlank() && !"unknown".equalsIgnoreCase(root)) this.rootAgent = root;
+            if (appName != null && !appName.isBlank() && !"unknown".equalsIgnoreCase(appName)) this.workflowName = appName;
+            else if (root != null && !root.isBlank() && !"unknown".equalsIgnoreCase(root)) this.workflowName = root;
+        }
         long durationMs() { return (completedAt > 0 ? completedAt : System.currentTimeMillis()) - startedAt; }
         Map<String,Object> toMap(boolean detail) {
             Map<String,Object> map = new LinkedHashMap<>();
             map.put("invocationId", invocationId); map.put("sessionId", sessionId); map.put("userId", userId);
-            map.put("rootAgent", rootAgent); map.put("status", status); map.put("startedAt", startedAt);
+            map.put("rootAgent", rootAgent); map.put("workflowName", workflowName); map.put("status", status); map.put("startedAt", startedAt);
             map.put("completedAt", completedAt); map.put("durationMs", durationMs()); map.put("eventCount", eventCount.get());
             map.put("agentCount", agents.size()); map.put("toolCount", tools.size()); map.put("compressionCount", compressions.size());
             map.put("inputTokens", inputTokens.get()); map.put("outputTokens", outputTokens.get()); map.put("totalTokens", totalTokens.get());
@@ -372,7 +406,7 @@ public class LightweightMonitorService {
     }
 
     private static final class AgentRecord {
-        final String name; volatile boolean tokensEstimated=true, providerUsageSeen=false; final AtomicLong startedAt=new AtomicLong(), completedAt=new AtomicLong(), modelStartedAt=new AtomicLong(), modelDurationMs=new AtomicLong(), modelCalls=new AtomicLong(), inputTokens=new AtomicLong(), outputTokens=new AtomicLong(), totalTokens=new AtomicLong();
+        final String name; volatile String lastRoutedModel = ""; volatile boolean tokensEstimated=true, providerUsageSeen=false; final AtomicLong startedAt=new AtomicLong(), completedAt=new AtomicLong(), modelStartedAt=new AtomicLong(), modelDurationMs=new AtomicLong(), modelCalls=new AtomicLong(), inputTokens=new AtomicLong(), outputTokens=new AtomicLong(), totalTokens=new AtomicLong();
         AgentRecord(String name){this.name=name;}
         void finishModel(long now){ long start=modelStartedAt.getAndSet(0); if(start>0) modelDurationMs.addAndGet(now-start); }
         void forceComplete(long now){ completedAt.compareAndSet(0,now); finishModel(now); }

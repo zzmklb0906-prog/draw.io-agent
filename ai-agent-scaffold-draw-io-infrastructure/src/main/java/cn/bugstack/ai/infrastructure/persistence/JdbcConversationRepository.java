@@ -24,13 +24,34 @@ public class JdbcConversationRepository implements IConversationRepository {
     public JdbcConversationRepository(JdbcTemplate jdbc, TransactionTemplate tx,StringRedisTemplate redis) { this.jdbc=jdbc;this.tx=tx;this.redis=redis; }
 
     @Override public ConversationView create(String username,String agentId,String sessionId,String title){
+        UUID workspaceId = ensureWorkspace(username);
         UUID id=UUID.randomUUID();
-        int changed=jdbc.update("insert into conversation(id,workspace_id,user_id,agent_id,adk_session_id,title) select ?,(select w.id from agent_workspace w where w.owner_user_id=u.id order by w.created_at limit 1),u.id,?,?,? from app_user u where u.username=?",
-                id,agentId,sessionId,blank(title,"新会话"),username);
+        int changed=jdbc.update("insert into conversation(id,workspace_id,user_id,agent_id,adk_session_id,title) select ?,?,u.id,?,?,? from app_user u where u.username=?",
+                id,workspaceId,agentId,sessionId,blank(title,"新会话"),username);
         if(changed!=1)throw new IllegalArgumentException("用户不存在: "+username);
         return get(username,id).orElseThrow();
     }
+
+    private UUID ensureWorkspace(String username) {
+        UUID userId = jdbc.query("select id from app_user where username=?", (rs, row) -> rs.getObject("id", UUID.class), username)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("用户不存在: " + username));
+        
+        List<UUID> existing = jdbc.query("select w.id from agent_workspace w join workspace_member wm on wm.workspace_id=w.id where wm.user_id=? order by w.created_at limit 1",
+                (rs, row) -> rs.getObject("id", UUID.class), userId);
+        
+        if (!existing.isEmpty()) {
+            return existing.get(0);
+        }
+
+        UUID workspaceId = UUID.randomUUID();
+        jdbc.update("insert into agent_workspace(id, owner_user_id, name, description) values(?, ?, ?, ?)",
+                workspaceId, userId, username + " 的个人工作区", "系统自动创建的默认工作区");
+        jdbc.update("insert into workspace_member(workspace_id, user_id, role) values(?, ?, 'OWNER') on conflict do nothing",
+                workspaceId, userId);
+        return workspaceId;
+    }
     @Override public List<ConversationView> list(String username,int limit){
+        ensureWorkspace(username);
         return jdbc.query("select c.*,case when c.status='RUNNING' then case when ci.status in ('SUCCESS','COMPLETED') then 'COMPLETED' when ci.status in ('ERROR','FAILED') then 'FAILED' when ci.status='CANCELLED' then 'CANCELLED' else coalesce((select w.status from workflow_checkpoint w where w.id=coalesce(c.current_checkpoint_id,(select w2.id from workflow_checkpoint w2 where w2.adk_session_id=c.adk_session_id order by w2.updated_at desc limit 1))),c.status) end else c.status end effective_status,coalesce(c.current_checkpoint_id,(select w.id from workflow_checkpoint w where w.adk_session_id=c.adk_session_id order by w.updated_at desc limit 1)) resolved_checkpoint_id,coalesce((select w.revision from workflow_checkpoint w where w.id=coalesce(c.current_checkpoint_id,(select w2.id from workflow_checkpoint w2 where w2.adk_session_id=c.adk_session_id order by w2.updated_at desc limit 1))),0) checkpoint_revision,(select count(*) from conversation_message m where m.conversation_id=c.id) message_count,t.tool_name active_tool_name,t.started_at active_tool_started_at,t.status active_tool_status from conversation c join workspace_member wm on wm.workspace_id=c.workspace_id join app_user u on u.id=wm.user_id left join agent_invocation ci on ci.id=c.current_invocation_id left join lateral(select tool_name,started_at,status from tool_execution where invocation_id=c.current_invocation_id and status='RUNNING' order by started_at desc limit 1)t on true where u.username=? and c.deleted_at is null order by coalesce(c.last_message_at,c.created_at) desc limit ?",
                 this::mapConversation,username,Math.max(1,Math.min(limit,200)));
     }

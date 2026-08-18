@@ -8,7 +8,26 @@ export interface ModelExecution { id: string; agentName: string; modelName: stri
 export interface ToolAttempt { attempt_no: number; status: string; started_at: string; completed_at?: string; duration_ms: number; result_summary?: string; error_message?: string }
 export interface ToolExecution { callId: string; agentName: string; toolName: string; startedAt: number; completedAt: number; durationMs: number; status: string; arguments?: string; summary: string; retryCount?: number; error?: string; attempts?: ToolAttempt[] }
 export interface CompressionRecord { beforeTokens: number; afterTokens: number; strategy: string; durationMs: number; timestamp: number }
-export interface ModelDecision { agentName: string; model: string; reason: string; complexity: number; explicit: boolean; timestamp: number }
+export interface ModelDecision {
+  agentName: string;
+  model: string;
+  reason: string;
+  complexity: number;
+  explicit: boolean;
+  timestamp: number;
+  narrative?: string;
+  metrics?: Record<string, unknown>;
+  matchedKeywords?: string[];
+  pipelineTrail?: Array<{
+    tier: string;
+    strategy?: string;
+    status: string;
+    complexity?: number;
+    score?: number;
+    matchedKeywords?: string[];
+    detail?: string;
+  }>;
+}
 export interface CapabilityEvent { event: 'SEARCH' | 'LOAD' | 'EXECUTE'; snapshotId: string; query?: string; capabilityIds?: string[]; capabilityId?: string; registrySize?: number; timestamp: number }
 export interface CapabilityCandidate { rank:number; capabilityId:string; type:string; group:string; name:string; version:number; riskLevel:string; score:number; selected:boolean }
 export interface CapabilitySearch { id:string; snapshotId:string; parentToolCallId:string; agentName:string; query:string; requestedTypes:string[]; registrySize:number; resultCount:number; status:string; startedAt:number; completedAt:number; durationMs:number; error:string; candidates:CapabilityCandidate[] }

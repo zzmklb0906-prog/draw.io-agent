@@ -23,16 +23,41 @@ function readUser(): AuthUser | null {
   }
 }
 
+export interface LoginResult {
+  success: boolean;
+  error?: string;
+}
+
 interface AuthState {
   user: AuthUser | null;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: readUser(),
   login: async (username, password) => {
-    try { const response=await fetch(apiUrl('/api/v1/auth/login'),{method:'POST',credentials:'include',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({username,password})});if(!response.ok)return false;const payload=await response.json() as {code:string;data?:AuthUser};if(payload.code!=='0000'||!payload.data)return false;localStorage.setItem(STORAGE_KEY,JSON.stringify(payload.data));sessionStorage.removeItem(STORAGE_KEY);set({user:payload.data});return true; } catch { return false; }
+    try {
+      const response = await fetch(apiUrl('/api/v1/auth/login'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const payload = await response.json().catch(() => ({})) as { code?: string; info?: string; message?: string; data?: AuthUser };
+      
+      if (!response.ok || payload.code !== '0000' || !payload.data) {
+        const errorMsg = payload.info || payload.message || (response.status === 429 ? '登录尝试过多，账号已被暂时限流，请稍后重试' : '登录失败，请检查账号密码');
+        return { success: false, error: errorMsg };
+      }
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload.data));
+      sessionStorage.removeItem(STORAGE_KEY);
+      set({ user: payload.data });
+      return { success: true };
+    } catch {
+      return { success: false, error: '网络连接失败，请检查后端服务是否启动' };
+    }
   },
   logout: () => {
     sessionStorage.removeItem(STORAGE_KEY);

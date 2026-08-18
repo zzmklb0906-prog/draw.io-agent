@@ -14,9 +14,12 @@ import org.springframework.stereotype.Component;
 import cn.bugstack.ai.domain.agent.service.monitor.LightweightMonitorService;
 import cn.bugstack.ai.domain.identity.adapter.ISecurityAuditRepository;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.*;
 
 /** The only stable toolset required by a general-purpose agent. */
+@Slf4j
 @Component
 public class CapabilityBrokerToolset implements BaseToolset {
     private final CapabilityRegistryService registry;
@@ -62,8 +65,18 @@ public class CapabilityBrokerToolset implements BaseToolset {
         @Override public Single<Map<String,Object>> runAsync(Map<String,Object> args, ToolContext context) {
             long startedAt=System.currentTimeMillis();
             restoreFromSession(args, context);
-            CapabilityDescriptor d = registry.load(required(args,"snapshotId"), required(args,"capabilityId"), context);
-            String executionId=monitor.capabilityStarted(context.invocationId(),context.agentName(),context.functionCallId().orElse(""),required(args,"snapshotId"),"LOAD",d,Map.of(),startedAt);
+            String snapshotId = optString(args, "snapshotId");
+            String capabilityId = optString(args, "capabilityId");
+            if (snapshotId.isEmpty() || capabilityId.isEmpty() || "none".equalsIgnoreCase(snapshotId) || "none".equalsIgnoreCase(capabilityId)) {
+                return Single.just(Map.of("status", "ERROR", "error", "缺少必填参数 'snapshotId' 或 'capabilityId'。如需检索能力请先调用 search_capabilities。"));
+            }
+            CapabilityDescriptor d;
+            try {
+                d = registry.load(snapshotId, capabilityId, context);
+            } catch (Exception e) {
+                return Single.just(Map.of("status", "ERROR", "error", "加载能力快照失败: " + e.getMessage()));
+            }
+            String executionId=monitor.capabilityStarted(context.invocationId(),context.agentName(),context.functionCallId().orElse(""),snapshotId,"LOAD",d,Map.of(),startedAt);
             Map<String,Object> result = new LinkedHashMap<>();
             result.put("capabilityId", d.capabilityId()); result.put("type", d.type()); result.put("name", d.name());
             result.put("description", d.description()); result.put("group", d.group()); result.put("riskLevel", d.riskLevel());
@@ -83,8 +96,29 @@ public class CapabilityBrokerToolset implements BaseToolset {
             restoreFromSession(args, context);
             Object raw = args.get("arguments");
             Map<String,Object> arguments = raw instanceof Map<?,?> map ? toStringMap(map) : Map.of();
-            String snapshotId=required(args,"snapshotId"), capabilityId=required(args,"capabilityId");
-            CapabilityDescriptor descriptor=registry.load(snapshotId,capabilityId,context);
+            String snapshotId = optString(args, "snapshotId");
+            String capabilityId = optString(args, "capabilityId");
+
+            if (snapshotId.isEmpty() || capabilityId.isEmpty() || "none".equalsIgnoreCase(snapshotId) || "none".equalsIgnoreCase(capabilityId)) {
+                return Single.just(Map.of(
+                    "status", "INVALID_CALL",
+                    "error", "执行动态能力失败：未接收到有效的 'snapshotId' 或 'capabilityId' 参数。",
+                    "guidance", "请按以下步骤操作：1. 如需检索外部扩展能力，请先调用 'search_capabilities(query=...)' 获取快照 ID；2. 如需直接生成 Draw.io 图表或回答用户问题，请勿调用此工具，直接在回答中输出内容即可。"
+                ));
+            }
+
+            CapabilityDescriptor descriptor;
+            try {
+                descriptor = registry.load(snapshotId, capabilityId, context);
+            } catch (Exception e) {
+                log.warn("Capability load failed snapshotId={} capabilityId={}: {}", snapshotId, capabilityId, e.getMessage());
+                return Single.just(Map.of(
+                    "status", "SNAPSHOT_EXPIRED",
+                    "error", "能力快照不存在或已过期。",
+                    "guidance", "请先调用 'search_capabilities' 重新搜索能力以获取全新的 snapshotId。"
+                ));
+            }
+
             if (!"READ_ONLY".equalsIgnoreCase(descriptor.riskLevel())) {
                 if (context.toolConfirmation().isEmpty()) {
                     audit.record(context.userId(),"TOOL_APPROVAL_REQUESTED","CAPABILITY",capabilityId,"PENDING","",Map.of("riskLevel",descriptor.riskLevel(),"invocationId",context.invocationId()));
@@ -114,6 +148,7 @@ public class CapabilityBrokerToolset implements BaseToolset {
     private static Schema stringSchema(String description) { return Schema.builder().type(Type.Known.STRING).description(description).build(); }
     private static Schema integerSchema(String description) { return Schema.builder().type(Type.Known.INTEGER).description(description).minimum(1d).maximum(16d).build(); }
     private static String required(Map<String,Object> args, String name) { String value=Objects.toString(args.get(name),"").trim(); if(value.isEmpty())throw new IllegalArgumentException(name+" is required");return value; }
+    private static String optString(Map<String,Object> args, String name) { return Objects.toString(args.get(name),"").trim(); }
     private static Map<String,Object> toStringMap(Map<?,?> source) { Map<String,Object> result=new LinkedHashMap<>();source.forEach((key,value)->result.put(String.valueOf(key),value));return result; }
     private void restoreFromSession(Map<String,Object> args, ToolContext context) {
         String snapshotId = Objects.toString(args.get("snapshotId"), "");

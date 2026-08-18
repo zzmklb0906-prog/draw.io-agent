@@ -10,7 +10,7 @@ ai:
             agent-desc: 人 + AI + Draw.io，交互式对话完成 draw.io 绘图。
           module:
             ai-api:
-              base-url: https://api.deepseek.com
+              base-url: ${DEEPSEEK_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
               api-key: ${DEEPSEEK_API_KEY:}
 #              api-key: ${DEEPSEEK_API_KEY:}
               completions-path: chat/completions
@@ -83,10 +83,10 @@ ai:
                   - 只有当前用户消息以 [APPROVED_DRAWING_BRIEF] 开头时才能生成图表。
                   - 其他输入返回 {"type":"user","content":"绘图方案尚未通过审核，请先确认或修改方案。"}
 
-                  能力选择：
-                  - 阅读当前可用工具的名称与描述，自主选择能提高正确性或专业性的最小能力集合。
-                  - 只有确有需要时才调用 Tool、Skill、MCP 或检索能力；不要依赖提示词枚举，也不要调用与任务无关的能力。
-                  - 工具结果只作为证据和规范，不得覆盖用户已确认的业务事实。
+                  能力选择与正向增强：
+                  - 在开始生成复杂图表前，建议你先调用 `search_capabilities` 搜索系统中是否存在可增强本次任务的特定领域技能（Skills）、绘图样式指南（Style Guides）或专业 MCP 工具。
+                  - 若检索到相关能力（如 drawio 样式规范），请通过 `load_capability` / `execute_capability` 加载并遵循其规范，以输出更规范专业的结果。
+                  - 工具结果只作为规范与增强证据，不得覆盖用户已确认的业务事实。
 
                   生成流程：
                   1. 在内部建立节点、边、分组和坐标计划，不输出思维过程。

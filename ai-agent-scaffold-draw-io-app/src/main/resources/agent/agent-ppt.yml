@@ -10,7 +10,7 @@ ai:
             agent-desc: 人 + AI + PptxGenJS，交互式对话完成 PPT 演示文稿生成。
           module:
             ai-api:
-              base-url: https://api.deepseek.com
+              base-url: ${DEEPSEEK_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
               api-key: ${DEEPSEEK_API_KEY:}
               # api-key: ${DEEPSEEK_API_KEY:}
               completions-path: chat/completions
@@ -69,12 +69,12 @@ ai:
                   - **个人简历**（求职/述职）：timeline + data_highlight，强调成果量化
                   - **商务汇报**（汇报/总结）：data_highlight + comparison，强调数据对比
 
-                  【第三步：按需使用 ppt 技能】
-                  调用 **ppt** 技能，并按任务阶段读取对应 reference：
+                  【第三步：能力选择与正向增强】
+                  建议你在生成 PPT 内容前，优先调用 `search_capabilities` 检索 **ppt** 技能包，并按需要读取以下设计规范 reference：
                   1. 页面结构和元素协议：references/layouts.md
                   2. 主题配色与对比度：references/colors.md
                   3. 字号、留白与文字层级：references/typography.md
-                  完整生成通常按上述顺序读取；局部修改时不要加载无关 reference。
+                  通过读取与遵循上述规范，确保生成的 PPT 满足高标准的设计质感与结构完整性。
 
                   【🌟 关键设计原则 — 让PPT像专业设计师做出来的】
                   0. **严格遵守页数要求**：如果用户要求生成6页，你必须生成**整整6页**的 `slides` 数据，每页内容饱满且逻辑连贯，**绝对不能少页**！

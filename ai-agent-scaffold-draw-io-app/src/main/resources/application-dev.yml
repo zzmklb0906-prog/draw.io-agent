@@ -51,10 +51,32 @@ ai:
       execution-timeout-ms: ${AGENT_EXECUTION_TIMEOUT_MS:900000}
     model-routing:
       enabled: ${MODEL_ROUTING_ENABLED:true}
+      strategy: ${MODEL_ROUTING_STRATEGY:composite} # composite | semantic | classifier | rule
       # 留空表示该档位继续使用 Agent 默认模型；显式前端模型永远优先。
-      fast-model: ${MODEL_FAST:}
-      balanced-model: ${MODEL_BALANCED:}
-      reasoning-model: ${MODEL_REASONING:}
+      fast-model: ${MODEL_FAST:qwen3.7-flash}
+      balanced-model: ${MODEL_BALANCED:qwen3.7-plus}
+      reasoning-model: ${MODEL_REASONING:qwen3.8-max}
+    model-providers:
+      qwen:
+        pattern: "^(qwen|qwen3).*"
+        base-url: ${QWEN_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+        api-key: ${QWEN_API_KEY:sk-ws-H.EPHPYRE.dbc8.MEYCIQDoRzXlLo52AHQhU6IedHpnsfjsGkG0Id68EZtS9kvGkwIhAOc3JMdHFNxe8J6zu0uZT2PGw-kAKAAPUjhxDXqk9Dza}
+        completions-path: chat/completions
+      deepseek:
+        pattern: "^deepseek.*"
+        base-url: ${DEEPSEEK_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+        api-key: ${DEEPSEEK_API_KEY:sk-ws-H.EPHYHXR.sctM.MEUCIQD56E_hrlk8CeVJlRu_MoaIhSPcOX1MPJzxycyRdFB-0AIgKV-aD-uF4_ASmeSfXEHx9cVzfnHeKXWMHwwiybv4SRQ}
+        completions-path: chat/completions
+      glm:
+        pattern: "^glm.*"
+        base-url: ${GLM_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+        api-key: ${GLM_API_KEY:sk-ws-H.EPHYRHH.uHHp.MEUCIBG5iEhquh_ggi93Df6n9nzMuN7j92LykWh9TXh52TOvAiEA2LQUZJgAS8l67J1lGoVzj1pr4nA7qzzD_Uyo5kpe1PI}
+        completions-path: chat/completions
+      kimi:
+        pattern: "^(kimi|moonshot).*"
+        base-url: ${KIMI_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+        api-key: ${KIMI_API_KEY:sk-ws-H.EPHYRLR.yGDS.MEUCICSdyBJeJ7JtokyedT1wW_Ohi-JfwPskjjbe3yqgrbaoAiEAweP3lAu_-rXAfV9vRt21DPUpxzVJRLAY5f5gquxNqGw}
+        completions-path: chat/completions
     tool-governance:
       timeout-ms: ${TOOL_TIMEOUT_MS:120000}
       failure-threshold: ${TOOL_FAILURE_THRESHOLD:3}

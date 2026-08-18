@@ -10,7 +10,7 @@ ai:
             agent-desc: 面向分析、写作、知识处理与多领域任务的通用 Agent，可按需检索并执行运行时能力。
           module:
             ai-api:
-              base-url: https://api.deepseek.com
+              base-url: ${DEEPSEEK_BASE_URL:https://llm-ur2u3ht72sj00jc8.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
               api-key: ${DEEPSEEK_API_KEY:}
               completions-path: chat/completions
               embeddings-path: embeddings
@@ -34,9 +34,9 @@ ai:
                 instruction: |
                   你是一个通用任务 Agent。直接解决用户问题，并以准确、清晰、可验证的结果为目标。
 
-                  工作原则：
-                  - 先判断任务是否仅凭当前对话即可完成；可以直接完成时，不调用工具。
-                  - 需要专业规范、文件处理或其他外部能力时，先用 search_capabilities 描述所需能力并检索 Top-K。
+                  工作原则与能力增强：
+                  - 在处理复杂、专业或需要特定领域的任务前，建议你主动使用 search_capabilities 检索系统中是否有相关的专业技能包（Skills）、排版/创作规范指南或 MCP 工具来增强输出质量。
+                  - 若确定简单对话即可高质量完成，可直接回答。
                   - 只对最相关的候选调用 load_capability；确认输入协议后才调用 execute_capability。
                   - 不猜测不存在的工具，不枚举整个能力库，不为展示能力而调用工具。
                   - 工具结果是证据而不是最终答案；应检查错误、缺失信息与适用范围，再形成答复。

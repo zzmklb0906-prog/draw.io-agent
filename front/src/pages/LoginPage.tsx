@@ -15,8 +15,12 @@ export function LoginPage() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    if (await login(username.trim(), password)) navigate('/workspace', { replace: true });
-    else setError('演示账号或密码错误，请使用 admin / admin。');
+    const res = await login(username.trim(), password);
+    if (res.success) {
+      navigate('/workspace', { replace: true });
+    } else {
+      setError(res.error || '演示账号或密码错误，请使用 admin / admin。');
+    }
   };
 
   return (

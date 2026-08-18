@@ -14,6 +14,7 @@ public interface IRuntimeObservationRepository {
     void agentStarted(String invocationId,String runId,String parentRunId,String agentName,String branch,long startedAt);
     void agentCompleted(String invocationId,String runId,String agentName,long completedAt,long durationMs,long modelCalls,long modelDurationMs,long inputTokens,long outputTokens);
     void modelStarted(String invocationId,String runId,String agentName,long startedAt,long estimatedInputTokens);
+    default void modelStarted(String invocationId,String runId,String agentName,String modelName,long startedAt,long estimatedInputTokens){modelStarted(invocationId,runId,agentName,startedAt,estimatedInputTokens);}
     void modelCompleted(String invocationId,String runId,String agentName,long completedAt,long durationMs,long inputTokens,long outputTokens,String status,String error);
     void toolStarted(String invocationId,String runId,String agentName,String callId,String toolName,long startedAt,String argumentsJson);
     default void toolStarted(String invocationId,String runId,String agentName,String callId,String toolName,long startedAt,String argumentsJson,Map<String,Object> governancePolicy){toolStarted(invocationId,runId,agentName,callId,toolName,startedAt,argumentsJson);}

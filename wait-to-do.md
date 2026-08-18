@@ -177,7 +177,18 @@
 
   这样“回到某次回答继续修改”才能真正实现，而不是只恢复聊天文本。
 
-  ## P3：动态 Subagent
+  ## P3：动态 Subagent 与父子 Agent 动态粒度路由 (Strategy 4)
+
+  ### 1. 方案 4：父子 Agent / Sub-Agent 级动态粒度分层路由
+
+  在未来做多 Agent 级联协作或动态通用 Agent 时代，路由粒度从单次 LLM Request 提升到 Agent / Sub-Agent 层级：
+
+  - **父 Agent（Planner / Brain）**：绑定旗舰 Reasoning 级大模型（如 `deepseek-v4-pro-0813` 或 `qwen3.8-max`），确保整体全局规划、决策分析和多轮任务分派不偏航。
+  - **子 Agent（Worker / Sub-Agent）**：根据具体 Sub-Agent 的 Spec 属性与子任务类型，动态配置不同粒度的模型：
+    - `code_explorer` / `mcp_query`：配置通用中等模型（`balanced`）。
+    - `data_formatter` / `xml_cleaner` / `text_translator`：配置极速 Flash 模型（`fast`）。
+
+  ### 2. 动态 Subagent 运行约束规范
 
   如果继续做动态 Subagent，建议不要让模型任意生成 Java 类。更稳妥的是：
 
@@ -190,6 +201,7 @@
 
   Subagent Spec 可以包含：
 
+  ```json
   {
     "name": "code_explorer",
     "objective": "...",
@@ -200,6 +212,7 @@
     "timeoutSeconds": 300,
     "writePermission": false
   }
+  ```
 
   需要配套：
   - DAG 依赖。
@@ -210,3 +223,4 @@
   - Token 总预算。
   - 失败传播策略。
   - 部分结果回收。
+

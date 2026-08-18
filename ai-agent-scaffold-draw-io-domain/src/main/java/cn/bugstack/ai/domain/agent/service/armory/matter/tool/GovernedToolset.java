@@ -36,6 +36,10 @@ public final class GovernedToolset implements BaseToolset {
     private final Map<String, CircuitState> circuits = new ConcurrentHashMap<>();
     private final Map<String, Semaphore> concurrency = new ConcurrentHashMap<>();
 
+    public GovernedToolset(BaseToolset delegate, long timeoutMs, int failureThreshold, long cooldownMs) {
+        this(delegate, timeoutMs, failureThreshold, cooldownMs, 0, 1000L, 10, 524_288, null, null);
+    }
+
     public GovernedToolset(BaseToolset delegate, long timeoutMs, int failureThreshold, long cooldownMs,
                            int maxRetries, long retryBackoffMs, int maxConcurrency, int maxResultBytes,
                            IdempotencyService idempotency,LightweightMonitorService monitor) {

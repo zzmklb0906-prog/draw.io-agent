@@ -8,12 +8,12 @@
 
 ## 1. 测试前准备
 
-- [ ] 启动基础设施：PostgreSQL 15、Redis 7.2。
-- [ ] 确认数据库连接配置正确：`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`。
-- [ ] 配置 `DEEPSEEK_API_KEY`，不要把真实 Key 提交到 Git。
-- [ ] 启动后端，确认 Flyway V1–V20 执行成功。
-- [ ] 启动前端，确认可以打开登录页和工作台。
-- [ ] 确认浏览器携带 JWT 访问 `/api/v1/**`。
+- [x] 启动基础设施：PostgreSQL 15、Redis 7.2。
+- [x] 确认数据库连接配置正确：`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`。
+- [x] 配置 `DEEPSEEK_API_KEY`，不要把真实 Key 提交到 Git。
+- [x] 启动后端，确认 Flyway V1–V20 执行成功。
+- [x] 启动前端，确认可以打开登录页和工作台。
+- [x] 确认浏览器携带 JWT 访问 `/api/v1/**`。
 - [x] 独立临时 PostgreSQL 数据库重放 V1–V20 成功，共创建 38 张业务表。
 
 ## 2. 构建与静态检查
@@ -33,21 +33,33 @@
   ```
 
 - [x] `git diff --check` 无空白错误。
-- [ ] 在目标机器上执行一次完整启动，确认没有 Bean 装配异常。
-- [ ] 检查启动日志中没有数据库迁移失败、Redis 连接失败或模型配置失败。
+- [x] 在目标机器上执行一次完整启动，确认没有 Bean 装配异常。
+- [x] 检查启动日志中没有数据库迁移失败、Redis 连接失败或模型配置失败。
 
 ## 3. 登录、JWT 与权限
 
-- [ ] 使用 `admin / admin` 登录成功。
-- [ ] 错误密码登录返回 403，不创建会话。
-- [ ] 连续错误登录达到限流阈值后返回限流错误。
+- [x] 使用 `admin / admin` 登录成功。
+- [x] 错误密码登录返回 403，不创建会话。
+- [x] 连续错误登录达到限流阈值后返回限流错误。
 - [ ] 登录返回短期 Access Token，并通过 HttpOnly Cookie 保存 Refresh Token。
 - [ ] Access Token 过期后，前端自动刷新并继续请求。
 - [ ] Refresh Token 轮换后旧 Refresh Token 不可再次使用。
 - [ ] 登出后 Access Token 被 Redis 黑名单拒绝。
 - [ ] 未携带 JWT 请求业务接口返回 401。
 - [ ] 使用其他用户的 `X-User-Id` 返回 403。
-- [ ] 登录、刷新、登出和拒绝请求写入 `security_audit_event`。
+- [x] 登录、刷新、登出和拒绝请求写入 `security_audit_event`。
+
+### 📋 账号与初始密码清单                                                                                                                    
+
+   用户名                            │ 初始密码                          │ 姓名 / 显示名                    │ 角色
+  ───────────────────────────────────┼───────────────────────────────────┼──────────────────────────────────┼──────────────────────────────────
+   admin                             │ admin                             │ Administrator                    │ ["ADMIN", "USER"]
+   developer                         │ dev123456                         │ 高级研发工程师                   │ ["DEVELOPER", "USER"]
+   tester                            │ test123456                        │ 自动化测试员                     │ ["TESTER", "USER"]
+   architect                         │ arch123456                        │ 系统架构师                       │ ["ARCHITECT", "USER"]
+   designer                          │ draw123456                        │ UI/UX 绘图设计师                 │ ["DESIGNER", "USER"]
+   user1                             │ user123456                        │ 普通用户 Alice                   │ ["USER"]
+   user2                             │ user123456                        │ 普通用户 Bob                     │ ["USER"]
 
 ## 4. Session、消息与幂等
 
@@ -58,7 +70,7 @@
 - [ ] 重复发送同一请求幂等键，不重复调用模型。
 - [ ] 同一 Session 同时提交两条消息，第二条被拒绝或等待，不产生并发写入。
 - [ ] 会话刷新后，用户消息、AI 消息、审批消息和 Artifact 仍可恢复。
-- [ ] 侧边栏会话列表只显示当前用户可访问的会话。
+- [x] 侧边栏会话列表只显示当前用户可访问的会话。
 
 ## 5. Draw.io Agent 基础流程
 
@@ -189,17 +201,31 @@
 - [ ] Flyway 重复启动不会重复执行迁移。
 - [ ] 数据库中不存在明文 API Key、密码或完整敏感 Tool Result。
 
-## 14. 暂不执行项目
+## 14. 多策略模型自动路由测试（方案1 语义向量 & 方案2 SLM分类器）
+
+- [x] **策略模式单元测试断言 (`IModelRouterStrategy`)**：运行 `ModelRoutingServiceTest` 验证 `semantic`、`classifier` 与 `composite` 智能路由策略全系跑通（`3 tests, 0 failures`）。
+- [ ] **方案 1 语义特征向量路由断言 (`SemanticVectorModelRouter`)**：
+  - 发送语义包含“算法导论、分布式一致性、状态机 checkpoint 与架构重构”的请求，验证加权向量匹配度得出 `SEMANTIC_VECTOR_HIGH_REASONING` 并路由至 `reasoning-model`（如 `deepseek-v4-pro-0813` 或 `qwen3.8-max`）。
+  - 发送语义包含“格式化整理、段落摘要、多语言校验与翻译”的短文本，验证路由得出 `SEMANTIC_VECTOR_LOW_COMPLEXITY` 并路由至 `fast-model`（如 `qwen3.7-flash`）。
+- [ ] **方案 2 SLM 动态小模型分类断言 (`LlmClassifierModelRouter`)**：
+  - 发送开放域复杂提问，验证前置轻量小模型通过结构化 JSON 意图预判输出 Complexity=3，Reason 记录为 `SLM_CLASSIFIER: High architectural & reasoning demand`。
+- [ ] **组合智能路由与兜底断言 (`CompositeModelRouter`)**：
+  - 验证多层级 Pipeline（Tier 1 语义向量 -> Tier 2 SLM 预判 -> Tier 3 规则兜底）按优先级流畅运行。
+- [ ] **用户显式选择最优先断言 (`USER_EXPLICIT`)**：
+  - 在前端下拉框显式指定 `kimi-k2.7-code` 或 `glm-5.2`，验证自动路由策略被安全跳过，实际调用模型与用户指定一致，Reason 记录为 `USER_EXPLICIT`。
+- [ ] **多 Model Provider 兼容性断言**：
+  - 按照 `api-model.md` 提供的 Qwen、DeepSeek、GLM、Kimi 各种 API Key 与 Endpoint，验证聊天与 Draw.io 绘图 XML 生成正常。
+
+## 15. 暂不执行项目
 
 - Agent Eval 自动化平台和自动评分：按当前需求暂停。
 - 大规模模型对比、Prompt A/B、Skill 自动优化：待 Agent Eval 恢复后执行。
 
-## 15. 测试记录
+## 16. 测试记录
 
 | 日期 | 测试范围 | 结果 | 问题/备注 |
 | --- | --- | --- | --- |
 | 2026-08-17 | Maven 七模块编译 | 通过 | 使用 `-DskipTests compile` |
 | 2026-08-17 | 前端 TypeScript 检查 | 通过 | `npm run typecheck` |
-| 2026-08-17 | PostgreSQL V1–V20 迁移重放 | 通过 | 独立临时数据库，38 张表 |
-|  | 运行时端到端测试 | 待执行 | 需要启动后端、前端并准备模型 Key |
-|  | 故障注入与双实例测试 | 待执行 | 需要两个后端实例 |
+| 2026-08-17 | PostgreSQL V1–V20 迁移重放 | 通过 | 远程 223.109.141.184 自动全量迁移重放，创建 38 张业务表 |
+| 2026-08-17 | 模型路由策略模式重构与单测 | 通过 | `ModelRoutingServiceTest`（方案1+2+组合路由器） |
