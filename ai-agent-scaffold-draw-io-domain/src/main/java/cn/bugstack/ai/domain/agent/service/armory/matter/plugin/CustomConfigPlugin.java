@@ -26,14 +26,20 @@ public class CustomConfigPlugin extends BasePlugin {
     private final ModelRoutingService modelRoutingService;
     private final LightweightMonitorService monitorService;
     private final ModelProviderRegistryService providerRegistryService;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService;
 
     public CustomConfigPlugin(ModelRoutingService modelRoutingService,
                               LightweightMonitorService monitorService,
-                              ModelProviderRegistryService providerRegistryService) {
+                              ModelProviderRegistryService providerRegistryService,
+                              cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory,
+                              cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService) {
         super("CustomConfigPlugin");
         this.modelRoutingService = modelRoutingService;
         this.monitorService = monitorService;
         this.providerRegistryService = providerRegistryService;
+        this.routingContextFactory = routingContextFactory;
+        this.requirementService = requirementService;
     }
 
     @Override
@@ -43,6 +49,25 @@ public class CustomConfigPlugin extends BasePlugin {
 
         boolean explicitModel = config != null && config.isCustomModelSelected() && StringUtils.isNotBlank(config.getModel());
         String finalModel = requestBuilder.build().model().orElse("");
+        String activeAgent = monitorService.activeAgentName(context.invocationId());
+
+        // Shadow Mode: Phase 3 Requirement Analysis for observation (does NOT alter model selection)
+        try {
+            var routingContext = routingContextFactory.create(
+                    requestBuilder.build(),
+                    activeAgent,
+                    "UNKNOWN",
+                    explicitModel,
+                    explicitModel ? config.getModel() : null
+            );
+            var requirement = requirementService.analyze(routingContext);
+            log.debug("Shadow Routing Requirement [invocationId={}]: taskType={}, reasoning={}, structured={}, tool={}, minContextTokens={}, agent={}",
+                    context.invocationId(), requirement.taskType(), requirement.reasoningRequired(),
+                    requirement.structuredOutputRequired(), requirement.toolCallingRequired(),
+                    requirement.minContextWindowTokens(), requirement.agentName());
+        } catch (Exception e) {
+            log.warn("Shadow routing requirement analysis skipped due to exception: {}", e.getMessage());
+        }
 
         if (!explicitModel) {
             ModelRoutingService.Decision decision = modelRoutingService.route(requestBuilder.build());
