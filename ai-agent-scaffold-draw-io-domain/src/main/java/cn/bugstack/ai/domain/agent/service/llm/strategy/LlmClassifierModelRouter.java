@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +25,7 @@ import java.util.Optional;
  * SLM/LLM-based intent classifier is integrated. At that point the SLM output
  * should produce capability requirement scores (not direct model names).
  *
- * <p><strong>Phase 1 fix:</strong> Now receives {@link RoutingTextInput} so that
+ * <p><strong>Phase 1 fix:</strong> Uses {@link LatestUserMessageExtractor} so that
  * {@code evaluateWithSlm()} only sees the latest user message, not the full
  * conversation history.
  */
@@ -32,17 +33,28 @@ import java.util.Optional;
 @Component("llmClassifierModelRouter")
 public class LlmClassifierModelRouter implements IModelRouterStrategy {
 
+    private final LatestUserMessageExtractor extractor;
     private final SemanticVectorModelRouter fallbackRouter;
 
-    public LlmClassifierModelRouter(SemanticVectorModelRouter fallbackRouter) {
+    public LlmClassifierModelRouter(LatestUserMessageExtractor extractor,
+                                    SemanticVectorModelRouter fallbackRouter) {
+        this.extractor = extractor;
         this.fallbackRouter = fallbackRouter;
     }
 
     @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
-        // Phase 1 fix: extract only the latest user message for complexity analysis.
-        // Before: String.valueOf(request.contents()) used the entire conversation history.
-        RoutingTextInput input = buildRoutingInput(request);
+        RoutingTextInput input = extractor.buildRoutingInput(request);
+        return routeFromInput(input, fastModel, balancedModel, reasoningModel);
+    }
+
+    /**
+     * Package-private overload allowing reuse of a pre-built {@link RoutingTextInput}.
+     */
+    ModelRoutingService.Decision routeFromInput(RoutingTextInput input,
+                                                String fastModel,
+                                                String balancedModel,
+                                                String reasoningModel) {
         String latestUserText = input.latestUserText();
 
         try {
@@ -87,8 +99,7 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
      * Rule-based heuristic classifier.
      *
      * <p><strong>NOT an SLM/LLM call.</strong> The method name is a legacy misnomer.
-     * This is a pure if-else heuristic operating on {@code latestUserText} only
-     * (Phase 1 fix: was previously receiving the full history string).
+     * This is a pure if-else heuristic operating on {@code latestUserText} only.
      *
      * @param latestUserText the current user message only
      */
@@ -117,31 +128,6 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
         } else {
             return Optional.of(new ClassifierResult(2, "General agent interaction"));
         }
-    }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    private RoutingTextInput buildRoutingInput(LlmRequest request) {
-        if (request == null || request.contents() == null || request.contents().isEmpty()) {
-            return RoutingTextInput.empty();
-        }
-        var contents = request.contents();
-        String latestUserText = "";
-        int totalChars = 0;
-
-        for (int i = contents.size() - 1; i >= 0; i--) {
-            var content = contents.get(i);
-            if (latestUserText.isEmpty()
-                    && content.role().map(r -> "user".equalsIgnoreCase(r.trim())).orElse(false)) {
-                latestUserText = content.text() != null ? content.text() : "";
-            }
-        }
-        for (var content : contents) {
-            totalChars += (content.text() != null ? content.text().length() : 0);
-        }
-        return new RoutingTextInput(latestUserText, totalChars);
     }
 
     private record ClassifierResult(int complexity, String reason) {}

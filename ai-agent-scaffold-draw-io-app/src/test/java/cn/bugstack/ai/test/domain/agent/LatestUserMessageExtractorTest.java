@@ -18,8 +18,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * <ul>
  *   <li>The extractor returns only the last user-role message, not the full history.</li>
  *   <li>Null/empty inputs are handled safely (no NullPointerException).</li>
- *   <li>Multi-part Content is properly concatenated.</li>
- *   <li>totalContextChars counts all content, not just user messages.</li>
+ *   <li>Multi-part Content is properly concatenated in correct order.</li>
+ *   <li>totalContextChars counts all content across all messages.</li>
+ *   <li>buildRoutingInput creates a consistent RoutingTextInput instance.</li>
  * </ul>
  */
 class LatestUserMessageExtractorTest {
@@ -77,7 +78,55 @@ class LatestUserMessageExtractorTest {
     }
 
     // -------------------------------------------------------------------------
-    // Context size
+    // Multi-part Content tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    void extractsLatestUserMessage_multiPartContent_concatenatesWithNewline() {
+        // Multi-part Content with multiple text parts
+        Content multiPartContent = Content.builder()
+                .role("user")
+                .parts(List.of(
+                        Part.fromText("第一部分内容"),
+                        Part.fromText("第二部分内容")
+                ))
+                .build();
+
+        LlmRequest request = LlmRequest.builder()
+                .model("test")
+                .contents(List.of(multiPartContent))
+                .build();
+
+        String result = extractor.extract(request);
+
+        assertEquals("第一部分内容\n第二部分内容", result,
+                "Multi-part text parts must be concatenated with newline in order");
+    }
+
+    @Test
+    void extractsLatestUserMessage_multiPartWithEmptyOrWhitespacePart_handlesGracefully() {
+        Content multiPartContent = Content.builder()
+                .role("user")
+                .parts(List.of(
+                        Part.fromText("有效部分"),
+                        Part.fromText("   "),
+                        Part.fromText("结尾部分")
+                ))
+                .build();
+
+        LlmRequest request = LlmRequest.builder()
+                .model("test")
+                .contents(List.of(multiPartContent))
+                .build();
+
+        String result = extractor.extract(request);
+
+        assertEquals("有效部分\n结尾部分", result,
+                "Blank text parts should be safely skipped during concatenation");
+    }
+
+    // -------------------------------------------------------------------------
+    // Context size and buildRoutingInput
     // -------------------------------------------------------------------------
 
     @Test
@@ -116,6 +165,24 @@ class LatestUserMessageExtractorTest {
         assertTrue(latest.length() < contextChars, "Latest user text is much shorter than total context");
     }
 
+    @Test
+    void buildRoutingInput_createsConsistentRecord() {
+        LlmRequest request = LlmRequest.builder()
+                .model("test")
+                .contents(List.of(
+                        userContent("第一轮超长消息".repeat(100)),
+                        assistantContent("模型回复"),
+                        userContent("修改标题")
+                ))
+                .build();
+
+        RoutingTextInput input = extractor.buildRoutingInput(request);
+
+        assertNotNull(input);
+        assertEquals("修改标题", input.latestUserText());
+        assertTrue(input.totalContextChars() > 700);
+    }
+
     // -------------------------------------------------------------------------
     // Null / empty safety
     // -------------------------------------------------------------------------
@@ -125,6 +192,10 @@ class LatestUserMessageExtractorTest {
         assertDoesNotThrow(() -> {
             String result = extractor.extract(null);
             assertEquals("", result);
+            RoutingTextInput input = extractor.buildRoutingInput(null);
+            assertNotNull(input);
+            assertEquals("", input.latestUserText());
+            assertEquals(0, input.totalContextChars());
         });
     }
 
@@ -161,7 +232,6 @@ class LatestUserMessageExtractorTest {
     }
 
     private static Content userContent(String text) {
-        // Content.fromParts sets no role — we need role=user explicitly
         return Content.builder().role("user").parts(List.of(Part.fromText(text))).build();
     }
 

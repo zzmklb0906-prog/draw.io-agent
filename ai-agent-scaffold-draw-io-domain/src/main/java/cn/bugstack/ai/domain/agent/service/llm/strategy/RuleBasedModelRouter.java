@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
 import org.springframework.stereotype.Component;
@@ -13,24 +14,36 @@ import java.util.Map;
 /**
  * Heuristic fallback rule-based router (Tier 3 / standalone).
  *
- * <p><strong>Phase 1 fix:</strong> Now uses {@link RoutingTextInput} so that keyword
+ * <p><strong>Phase 1 fix:</strong> Uses {@link LatestUserMessageExtractor} so that keyword
  * and length checks operate on {@code latestUserText} only, not the full conversation history.
  *
  * <p>Known limitations (to be addressed in Phase 2+):
  * <ul>
  *   <li>No negation detection — "不需要架构分析" still matches "架构".</li>
- *   <li>Length threshold (12,000 chars) applied to the context window, not the current task.</li>
  * </ul>
  */
 @Component("ruleBasedModelRouter")
 public class RuleBasedModelRouter implements IModelRouterStrategy {
 
+    private final LatestUserMessageExtractor extractor;
+
+    public RuleBasedModelRouter(LatestUserMessageExtractor extractor) {
+        this.extractor = extractor;
+    }
+
     @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
-        // Phase 1 fix: use latestUserText for keyword + complexity analysis.
-        // totalContextChars is kept as a separate metric.
-        // Before: String.valueOf(request.contents()) used the entire conversation history.
-        RoutingTextInput input = buildRoutingInput(request);
+        RoutingTextInput input = extractor.buildRoutingInput(request);
+        return routeFromInput(input, fastModel, balancedModel, reasoningModel);
+    }
+
+    /**
+     * Package-private overload allowing reuse of a pre-built {@link RoutingTextInput}.
+     */
+    ModelRoutingService.Decision routeFromInput(RoutingTextInput input,
+                                                String fastModel,
+                                                String balancedModel,
+                                                String reasoningModel) {
         String latestUserText = input.latestUserText();
         int latestLen = latestUserText.length();
         String lower = latestUserText.toLowerCase();
@@ -93,26 +106,5 @@ public class RuleBasedModelRouter implements IModelRouterStrategy {
             if (text.contains(term)) return true;
         }
         return false;
-    }
-
-    private RoutingTextInput buildRoutingInput(LlmRequest request) {
-        if (request == null || request.contents() == null || request.contents().isEmpty()) {
-            return RoutingTextInput.empty();
-        }
-        var contents = request.contents();
-        String latestUserText = "";
-        int totalChars = 0;
-
-        for (int i = contents.size() - 1; i >= 0; i--) {
-            var content = contents.get(i);
-            if (latestUserText.isEmpty()
-                    && content.role().map(r -> "user".equalsIgnoreCase(r.trim())).orElse(false)) {
-                latestUserText = content.text() != null ? content.text() : "";
-            }
-        }
-        for (var content : contents) {
-            totalChars += (content.text() != null ? content.text().length() : 0);
-        }
-        return new RoutingTextInput(latestUserText, totalChars);
     }
 }

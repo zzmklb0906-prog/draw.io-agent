@@ -36,6 +36,25 @@ import java.util.List;
 public class LatestUserMessageExtractor {
 
     /**
+     * Unified factory method: builds a {@link RoutingTextInput} from an {@link LlmRequest}.
+     *
+     * <p>Extracts the latest user message for intent & complexity analysis, and computes
+     * the total character count of the whole context for window-budget awareness.</p>
+     *
+     * @param request the incoming LLM request (may be null)
+     * @return a safe {@link RoutingTextInput} instance (never null)
+     */
+    public RoutingTextInput buildRoutingInput(LlmRequest request) {
+        if (request == null || request.contents() == null || request.contents().isEmpty()) {
+            return RoutingTextInput.empty();
+        }
+        return new RoutingTextInput(
+                extract(request),
+                totalContextChars(request)
+        );
+    }
+
+    /**
      * Extracts the text of the last user-role Content in {@code request}.
      *
      * @param request the incoming LLM request (may be null)

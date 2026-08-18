@@ -1,6 +1,8 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
+import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,23 +22,24 @@ import java.util.Map;
  * <p>Tier 2: Structural intent heuristic ({@link LlmClassifierModelRouter})
  * <p>Tier 3: Rule-based fallback ({@link RuleBasedModelRouter})
  *
- * <p><strong>Phase 1 note:</strong>
- * All three tiers now receive {@code latestUserText} only (via the individual routers'
- * {@code buildRoutingInput()} helpers), not the full conversation history.
- * The tier descriptions in the pipeline trail have been corrected to avoid
- * misleading "SLM" and "语义向量" labels.
+ * <p><strong>Phase 1 fix:</strong>
+ * Uses {@link LatestUserMessageExtractor} to build a single {@link RoutingTextInput},
+ * passing it across all tiers without repeated parsing.
  */
 @Slf4j
 @Component("compositeModelRouter")
 public class CompositeModelRouter implements IModelRouterStrategy {
 
+    private final LatestUserMessageExtractor extractor;
     private final SemanticVectorModelRouter semanticRouter;
     private final LlmClassifierModelRouter classifierRouter;
     private final RuleBasedModelRouter ruleRouter;
 
-    public CompositeModelRouter(SemanticVectorModelRouter semanticRouter,
+    public CompositeModelRouter(LatestUserMessageExtractor extractor,
+                                SemanticVectorModelRouter semanticRouter,
                                 LlmClassifierModelRouter classifierRouter,
                                 RuleBasedModelRouter ruleRouter) {
+        this.extractor = extractor;
         this.semanticRouter = semanticRouter;
         this.classifierRouter = classifierRouter;
         this.ruleRouter = ruleRouter;
@@ -44,11 +47,12 @@ public class CompositeModelRouter implements IModelRouterStrategy {
 
     @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
-        java.util.List<Map<String, Object>> pipelineTrail = new java.util.ArrayList<>();
+        RoutingTextInput input = extractor.buildRoutingInput(request);
+        List<Map<String, Object>> pipelineTrail = new ArrayList<>();
 
         // Tier 1: Keyword-density heuristic check
-        ModelRoutingService.Decision semanticDecision = semanticRouter.route(request, fastModel, balancedModel, reasoningModel);
-        Map<String, Object> tier1 = new java.util.LinkedHashMap<>();
+        ModelRoutingService.Decision semanticDecision = semanticRouter.routeFromInput(input, fastModel, balancedModel, reasoningModel);
+        Map<String, Object> tier1 = new LinkedHashMap<>();
         tier1.put("tier", "Tier 1: 关键词密度启发式分析");
         tier1.put("strategy", "semanticVectorModelRouter (keyword-density heuristic)");
         tier1.put("complexity", semanticDecision.complexity());
@@ -75,8 +79,8 @@ public class CompositeModelRouter implements IModelRouterStrategy {
         }
 
         // Tier 2: Structural intent heuristic check
-        ModelRoutingService.Decision classifierDecision = classifierRouter.route(request, fastModel, balancedModel, reasoningModel);
-        Map<String, Object> tier2 = new java.util.LinkedHashMap<>();
+        ModelRoutingService.Decision classifierDecision = classifierRouter.routeFromInput(input, fastModel, balancedModel, reasoningModel);
+        Map<String, Object> tier2 = new LinkedHashMap<>();
         tier2.put("tier", "Tier 2: 结构化意图启发式分类");
         tier2.put("strategy", "llmClassifierModelRouter (rule-based heuristic, NOT an SLM)");
         tier2.put("complexity", classifierDecision.complexity());
@@ -101,8 +105,8 @@ public class CompositeModelRouter implements IModelRouterStrategy {
         }
 
         // Tier 3: Fallback Rule Router
-        ModelRoutingService.Decision ruleDecision = ruleRouter.route(request, fastModel, balancedModel, reasoningModel);
-        Map<String, Object> tier3 = new java.util.LinkedHashMap<>();
+        ModelRoutingService.Decision ruleDecision = ruleRouter.routeFromInput(input, fastModel, balancedModel, reasoningModel);
+        Map<String, Object> tier3 = new LinkedHashMap<>();
         tier3.put("tier", "Tier 3: 默认规则与平衡保底");
         tier3.put("strategy", "ruleBasedModelRouter");
         tier3.put("status", "HIT");

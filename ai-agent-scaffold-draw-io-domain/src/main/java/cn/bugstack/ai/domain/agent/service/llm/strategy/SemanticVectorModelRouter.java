@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -26,8 +27,8 @@ import java.util.Map;
  *       domain keywords and accumulate a weighted score.</li>
  *   <li>Apply a Poisson-style saturation: {@code score = 1 - exp(-accumulatedWeight)}
  *       so that a single keyword cannot saturate to 1.0.</li>
- *   <li>Combine with a log-scaled context-length factor (using {@code totalContextChars}
- *       for window-budget awareness, NOT as a complexity driver).</li>
+ *   <li>Combine with a log-scaled task-length factor (using {@code latestUserText.length()},
+ *       NOT the conversation history, avoiding length contamination from multi-turn chats).</li>
  *   <li>Compare to fixed thresholds to select L1 / L2 / L3 tier.</li>
  * </ol>
  *
@@ -35,13 +36,15 @@ import java.util.Map;
  * <ul>
  *   <li>Cannot detect negation ("不需要架构分析") — treats negated keywords the same as affirmed ones.</li>
  *   <li>Single keyword with weight 0.9 can push score above 0.45 threshold when combined with
- *       context-length factor — see threshold discussion in the refactor guide.</li>
+ *       task-length factor — see threshold discussion in the refactor guide.</li>
  *   <li>Substring matching only — no synonym or semantic awareness.</li>
  * </ul>
  */
 @Slf4j
 @Component("semanticVectorModelRouter")
 public class SemanticVectorModelRouter implements IModelRouterStrategy {
+
+    private final LatestUserMessageExtractor extractor;
 
     // Keyword weights for high-complexity tasks
     private static final Map<String, Double> REASONING_KEYWORDS = new HashMap<>() {{
@@ -66,22 +69,23 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
         put("纠错", 0.8); put("title", 0.8);
     }};
 
+    public SemanticVectorModelRouter(LatestUserMessageExtractor extractor) {
+        this.extractor = extractor;
+    }
+
     // -------------------------------------------------------------------------
-    // IModelRouterStrategy — primary entry point (called by CompositeModelRouter)
+    // IModelRouterStrategy — primary entry point
     // -------------------------------------------------------------------------
 
     @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
-        // Phase 1 fix: all keyword analysis now runs on latestUserText only.
-        // totalContextChars is kept as a separate metric for context-window budget awareness.
-        // Before: String.valueOf(request.contents()) fed the ENTIRE conversation history.
-        RoutingTextInput input = buildRoutingInput(request);
+        RoutingTextInput input = extractor.buildRoutingInput(request);
         return routeFromInput(input, fastModel, balancedModel, reasoningModel);
     }
 
     /**
      * Package-private overload for CompositeModelRouter — allows passing a pre-built
-     * RoutingTextInput to avoid redundant extraction.
+     * RoutingTextInput to avoid redundant extraction across pipeline tiers.
      */
     ModelRoutingService.Decision routeFromInput(RoutingTextInput input,
                                                 String fastModel,
@@ -96,17 +100,18 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
         double reasoningScore = reasoningResult.score;
         double lightweightScore = lightweightResult.score;
 
-        // Context-length factor: uses totalContextChars to reflect window budget.
-        // NOTE: this is a context-size indicator, NOT a measure of current task complexity.
-        double logLengthFactor = Math.min(1.0, Math.log10(Math.max(1, input.totalContextChars())) / 4.5);
-        double finalReasoningScore = (reasoningScore * 0.7) + (logLengthFactor * 0.3);
+        // Task-length factor: uses latestUserText.length() so whole-history size does NOT
+        // escalate current task complexity.
+        double taskLengthFactor = Math.min(1.0, Math.log10(Math.max(1, latestUserText.length())) / 4.5);
+        double finalReasoningScore = (reasoningScore * 0.7) + (taskLengthFactor * 0.3);
 
         Map<String, Object> metrics = new java.util.LinkedHashMap<>();
         metrics.put("latestUserTextLength", latestUserText.length());
         metrics.put("totalContextChars", input.totalContextChars());
         metrics.put("reasoningScore", Math.round(reasoningScore * 1000.0) / 1000.0);
         metrics.put("lightweightScore", Math.round(lightweightScore * 1000.0) / 1000.0);
-        metrics.put("logLengthFactor", Math.round(logLengthFactor * 1000.0) / 1000.0);
+        metrics.put("taskLengthFactor", Math.round(taskLengthFactor * 1000.0) / 1000.0);
+        metrics.put("logLengthFactor", Math.round(taskLengthFactor * 1000.0) / 1000.0); // backwards-compatible alias
         metrics.put("finalReasoningScore", Math.round(finalReasoningScore * 1000.0) / 1000.0);
         metrics.put("reasoningThreshold", 0.45);
         metrics.put("lightweightThreshold", 0.40);
@@ -121,10 +126,10 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
         if (finalReasoningScore > 0.45 && reasoningModel != null && !reasoningModel.isBlank()) {
             String narrative = String.format(
                     "当前用户消息长 %d 字符，命中复杂度特征词 %s，" +
-                    "关键词密度评分 %.3f，上下文长度因子 %.3f，综合评分 %.3f (超过阈值 0.45)。" +
+                    "关键词密度评分 %.3f，任务长度因子 %.3f，综合评分 %.3f (超过阈值 0.45)。" +
                     "判定为高复杂度任务，路由至 %s 以提升结构化输出稳定性。",
                     latestUserText.length(), reasoningResult.matchedKeywords,
-                    reasoningScore, logLengthFactor, finalReasoningScore, reasoningModel);
+                    reasoningScore, taskLengthFactor, finalReasoningScore, reasoningModel);
             return new ModelRoutingService.Decision(reasoningModel, "SEMANTIC_VECTOR_HIGH_REASONING", 3,
                     narrative, metrics, reasoningResult.matchedKeywords, List.of());
         }
@@ -167,35 +172,6 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
-    /**
-     * Builds RoutingTextInput from LlmRequest.
-     * Kept here so SemanticVectorModelRouter works as a standalone strategy without
-     * requiring injection of LatestUserMessageExtractor.
-     */
-    private RoutingTextInput buildRoutingInput(LlmRequest request) {
-        if (request == null || request.contents() == null || request.contents().isEmpty()) {
-            return RoutingTextInput.empty();
-        }
-
-        var contents = request.contents();
-        String latestUserText = "";
-        int totalChars = 0;
-
-        for (int i = contents.size() - 1; i >= 0; i--) {
-            var content = contents.get(i);
-            String text = content.text() != null ? content.text() : "";
-            if (latestUserText.isEmpty()
-                    && content.role().map(r -> "user".equalsIgnoreCase(r.trim())).orElse(false)) {
-                latestUserText = text;
-            }
-        }
-        for (var content : contents) {
-            totalChars += (content.text() != null ? content.text().length() : 0);
-        }
-
-        return new RoutingTextInput(latestUserText, totalChars);
-    }
 
     private DensityResult calculateDensity(String lowerText, Map<String, Double> keywordWeights) {
         double accumulated = 0.0;
