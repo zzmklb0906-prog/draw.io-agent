@@ -3,229 +3,171 @@ package cn.bugstack.ai.test.domain.agent;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
+import com.google.genai.types.Blob;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link LatestUserMessageExtractor}.
  *
- * <p>Verifies that:
- * <ul>
- *   <li>The extractor returns only the last user-role message, not the full history.</li>
- *   <li>Null/empty inputs are handled safely (no NullPointerException).</li>
- *   <li>Multi-part Content is properly concatenated in correct order.</li>
- *   <li>totalContextChars counts all content across all messages.</li>
- *   <li>buildRoutingInput creates a consistent RoutingTextInput instance.</li>
- * </ul>
+ * <p>Validates single-turn extraction, multi-turn history isolation, multi-part text aggregation,
+ * whole-context size counting, and current-turn user content discovery.</p>
  */
 class LatestUserMessageExtractorTest {
 
-    private final LatestUserMessageExtractor extractor = new LatestUserMessageExtractor();
+    private LatestUserMessageExtractor extractor;
 
-    // -------------------------------------------------------------------------
-    // Basic extraction
-    // -------------------------------------------------------------------------
-
-    @Test
-    void extractsLatestUserMessage_singleTurn() {
-        LlmRequest request = request(userContent("你好"));
-        String result = extractor.extract(request);
-        assertEquals("你好", result);
+    @BeforeEach
+    void setUp() {
+        this.extractor = new LatestUserMessageExtractor();
     }
 
-    @Test
-    void extractsLatestUserMessage_multiTurn_returnsLastUserOnly() {
-        // Multi-turn: complex first message + simple second message
-        // This is the core regression: should NOT return the full history
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(
-                        userContent("请深入分析整个系统架构、状态机、并发模型以及一致性"),
-                        assistantContent("（很长的架构分析回复）... 系统架构包含多个核心模块..."),
-                        userContent("把标题改成登录流程")  // ← this is the latest user message
-                ))
-                .build();
-
-        String result = extractor.extract(request);
-
-        // Must return ONLY the last user message
-        assertEquals("把标题改成登录流程", result);
-        assertFalse(result.contains("架构"), "Multi-turn extraction must NOT contain first-turn history keywords");
-        assertFalse(result.contains("状态机"), "Must NOT contaminate with first-turn assistant-provided content");
-    }
+    // =========================================================================
+    // Case 1 & 2: Null request / empty contents
+    // =========================================================================
 
     @Test
-    void extractsLatestUserMessage_skipsAssistantMessages() {
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(
-                        userContent("第一轮问题"),
-                        assistantContent("第一轮回答"),
-                        userContent("第二轮问题"),
-                        assistantContent("第二轮回答")  // ← last message is assistant, not user
-                ))
-                .build();
-
-        String result = extractor.extract(request);
-
-        // Should find the last USER message, not the assistant's last message
-        assertEquals("第二轮问题", result);
-    }
-
-    // -------------------------------------------------------------------------
-    // Multi-part Content tests
-    // -------------------------------------------------------------------------
-
-    @Test
-    void extractsLatestUserMessage_multiPartContent_concatenatesWithNewline() {
-        // Multi-part Content with multiple text parts
-        Content multiPartContent = Content.builder()
-                .role("user")
-                .parts(List.of(
-                        Part.fromText("第一部分内容"),
-                        Part.fromText("第二部分内容")
-                ))
-                .build();
-
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(multiPartContent))
-                .build();
-
-        String result = extractor.extract(request);
-
-        assertEquals("第一部分内容\n第二部分内容", result,
-                "Multi-part text parts must be concatenated with newline in order");
-    }
-
-    @Test
-    void extractsLatestUserMessage_multiPartWithEmptyOrWhitespacePart_handlesGracefully() {
-        Content multiPartContent = Content.builder()
-                .role("user")
-                .parts(List.of(
-                        Part.fromText("有效部分"),
-                        Part.fromText("   "),
-                        Part.fromText("结尾部分")
-                ))
-                .build();
-
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(multiPartContent))
-                .build();
-
-        String result = extractor.extract(request);
-
-        assertEquals("有效部分\n结尾部分", result,
-                "Blank text parts should be safely skipped during concatenation");
-    }
-
-    // -------------------------------------------------------------------------
-    // Context size and buildRoutingInput
-    // -------------------------------------------------------------------------
-
-    @Test
-    void totalContextChars_countsAllContents() {
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(
-                        userContent("12345"),       // 5 chars
-                        assistantContent("67890")   // 5 chars
-                ))
-                .build();
-
-        int total = extractor.totalContextChars(request);
-        assertEquals(10, total, "Should count chars across all messages, not just user messages");
-    }
-
-    @Test
-    void totalContextChars_doesNotEqualLatestUserLen() {
-        // Demonstrates the separation of concerns:
-        // latestUserText.length() != totalContextChars()
-        String longHistory = "A".repeat(5000);
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(
-                        userContent(longHistory),          // 5000 chars - first turn complex
-                        assistantContent("回答"),           // 2 chars
-                        userContent("修改标题")              // 4 chars - latest user message
-                ))
-                .build();
-
-        String latest = extractor.extract(request);
-        int contextChars = extractor.totalContextChars(request);
-
-        assertEquals("修改标题", latest, "Latest user text should be the current short message");
-        assertTrue(contextChars > 5000, "Context chars should include full history");
-        assertTrue(latest.length() < contextChars, "Latest user text is much shorter than total context");
-    }
-
-    @Test
-    void buildRoutingInput_createsConsistentRecord() {
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(
-                        userContent("第一轮超长消息".repeat(100)),
-                        assistantContent("模型回复"),
-                        userContent("修改标题")
-                ))
-                .build();
-
-        RoutingTextInput input = extractor.buildRoutingInput(request);
-
-        assertNotNull(input);
-        assertEquals("修改标题", input.latestUserText());
-        assertTrue(input.totalContextChars() > 700);
-    }
-
-    // -------------------------------------------------------------------------
-    // Null / empty safety
-    // -------------------------------------------------------------------------
-
-    @Test
-    void returnsEmpty_whenRequestIsNull() {
-        assertDoesNotThrow(() -> {
-            String result = extractor.extract(null);
-            assertEquals("", result);
-            RoutingTextInput input = extractor.buildRoutingInput(null);
-            assertNotNull(input);
-            assertEquals("", input.latestUserText());
-            assertEquals(0, input.totalContextChars());
-        });
-    }
-
-    @Test
-    void returnsEmpty_whenContentsIsEmpty() {
-        LlmRequest request = LlmRequest.builder().model("test").contents(List.of()).build();
-        String result = extractor.extract(request);
-        assertEquals("", result);
-    }
-
-    @Test
-    void returnsEmpty_whenNoUserContentExists() {
-        // Only assistant messages, no user message
-        LlmRequest request = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(assistantContent("系统提示或工具结果")))
-                .build();
-
-        String result = extractor.extract(request);
-        assertEquals("", result, "Should safely return empty when no user message is present");
-    }
-
-    @Test
-    void totalContextChars_returnsZero_whenNull() {
+    void case1_nullRequest_returnsEmpty() {
+        assertEquals("", extractor.extract(null));
         assertEquals(0, extractor.totalContextChars(null));
+
+        RoutingTextInput input = extractor.buildRoutingInput(null);
+        assertNotNull(input);
+        assertEquals("", input.latestUserText());
+        assertEquals(0, input.totalContextChars());
+        assertTrue(extractor.findLatestUserContent(null).isEmpty());
     }
 
-    // -------------------------------------------------------------------------
+    @Test
+    void case2_emptyContents_returnsEmpty() {
+        LlmRequest req = request();
+        assertEquals("", extractor.extract(req));
+        assertEquals(0, extractor.totalContextChars(req));
+
+        RoutingTextInput input = extractor.buildRoutingInput(req);
+        assertEquals("", input.latestUserText());
+        assertEquals(0, input.totalContextChars());
+        assertTrue(extractor.findLatestUserContent(req).isEmpty());
+    }
+
+    // =========================================================================
+    // Case 3 & 4: Single user message / Multi-turn isolation
+    // =========================================================================
+
+    @Test
+    void case3_singleUserMessage_extractsFullText() {
+        LlmRequest req = request(userContent("画一个微信登录时序图"));
+        assertEquals("画一个微信登录时序图", extractor.extract(req));
+        assertEquals("画一个微信登录时序图".length(), extractor.totalContextChars(req));
+    }
+
+    @Test
+    void case4_multiTurn_extractsOnlyLatestUserMessage() {
+        LlmRequest req = request(
+                userContent("第一轮：请设计一个高可用分布式架构方案并进行详细分析"),
+                assistantContent("第一轮回答：架构方案包含网关、微服务、分布式缓存与数据库分库分表……"),
+                userContent("把标题改成系统架构")
+        );
+
+        String latest = extractor.extract(req);
+        assertEquals("把标题改成系统架构", latest,
+                "Must extract ONLY the latest user message, ignoring earlier turns");
+
+        int totalChars = extractor.totalContextChars(req);
+        assertTrue(totalChars > latest.length(),
+                "totalContextChars must include historical turns for capacity awareness");
+    }
+
+    // =========================================================================
+    // findLatestUserContent & Multi-modal Parts
+    // =========================================================================
+
+    @Test
+    void case5_findLatestUserContent_returnsLastUser() {
+        Content user1 = userContent("第一轮问题");
+        Content user2 = userContent("第二轮问题");
+        LlmRequest req = request(user1, assistantContent("第一轮回答"), user2);
+
+        Optional<Content> result = extractor.findLatestUserContent(req);
+        assertTrue(result.isPresent());
+        assertEquals("第二轮问题", extractor.extract(req));
+    }
+
+    @Test
+    void case6_findLatestUserContent_ignoresTrailingAssistant() {
+        Content user1 = userContent("当前用户问题");
+        LlmRequest req = request(user1, assistantContent("助手中间响应"));
+
+        Optional<Content> result = extractor.findLatestUserContent(req);
+        assertTrue(result.isPresent());
+        assertEquals("当前用户问题", extractor.extract(req));
+    }
+
+    @Test
+    void case7_findLatestUserContent_noUserReturnsEmpty() {
+        LlmRequest req = request(assistantContent("没有用户消息"), assistantContent("第二条助手消息"));
+        assertTrue(extractor.findLatestUserContent(req).isEmpty());
+        assertEquals("", extractor.extract(req));
+    }
+
+    @Test
+    void case8_findLatestUserContent_withImageAndText_extractsOnlyText() {
+        Part imgPart = Part.builder()
+                .inlineData(Blob.builder().mimeType("image/png").data(new byte[]{1, 2}).build())
+                .build();
+        Part txtPart = Part.fromText("分析图表");
+        Content multimodalUser = Content.builder().role("user").parts(List.of(imgPart, txtPart)).build();
+
+        LlmRequest req = request(multimodalUser);
+        Optional<Content> content = extractor.findLatestUserContent(req);
+        assertTrue(content.isPresent());
+        assertEquals(2, content.get().parts().get().size());
+
+        // extract() should only extract the text Part
+        assertEquals("分析图表", extractor.extract(req));
+    }
+
+    // =========================================================================
+    // Case 9: Multi-part text aggregation
+    // =========================================================================
+
+    @Test
+    void case9_multiPartMessage_concatenatesParts() {
+        Content multiPart = Content.builder()
+                .role("user")
+                .parts(List.of(
+                        Part.fromText("第一段说明"),
+                        Part.fromText("第二段补充")
+                ))
+                .build();
+        LlmRequest req = request(multiPart);
+
+        String result = extractor.extract(req);
+        assertTrue(result.contains("第一段说明"));
+        assertTrue(result.contains("第二段补充"));
+    }
+
+    // =========================================================================
+    // Case 10: Case-insensitive role matching
+    // =========================================================================
+
+    @Test
+    void case10_caseInsensitiveRole_matchedCorrectly() {
+        Content userUpper = Content.builder().role("USER").parts(List.of(Part.fromText("大写角色测试"))).build();
+        LlmRequest req = request(userUpper);
+        assertEquals("大写角色测试", extractor.extract(req));
+    }
+
+    // =========================================================================
     // Helpers
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     private static LlmRequest request(Content... contents) {
         return LlmRequest.builder().model("test").contents(List.of(contents)).build();

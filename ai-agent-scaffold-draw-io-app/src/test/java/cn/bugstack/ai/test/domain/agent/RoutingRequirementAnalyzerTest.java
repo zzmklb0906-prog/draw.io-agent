@@ -17,10 +17,10 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for {@link RuleBasedRoutingRequirementAnalyzer} (Phase 3 Requirement Analysis).
+ * Unit tests for {@link RuleBasedRoutingRequirementAnalyzer} and {@link CurrentTurnVisionDetector}.
  *
  * <p>Validates task detection, agent-aware requirement adjustments, context/complexity separation,
- * vision detection, score clamping, and zero dependency on ModelCatalogService.</p>
+ * multimodal isolation (historical vs current turn), score clamping, and zero dependency on ModelCatalogService.</p>
  */
 class RoutingRequirementAnalyzerTest {
 
@@ -34,13 +34,14 @@ class RoutingRequirementAnalyzerTest {
         this.contextFactory = new RoutingContextFactory(extractor, tokenEstimator);
 
         TaskTypeDetector detector = new TaskTypeDetector();
+        CurrentTurnVisionDetector visionDetector = new CurrentTurnVisionDetector(extractor);
         List<AgentRequirementPolicy> policies = List.of(
                 new AnalystAgentRequirementPolicy(),
                 new DrawerAgentRequirementPolicy(),
                 new ReviewerAgentRequirementPolicy()
         );
         // Note: Zero dependency on ModelCatalogService
-        this.analyzer = new RuleBasedRoutingRequirementAnalyzer(detector, policies);
+        this.analyzer = new RuleBasedRoutingRequirementAnalyzer(detector, visionDetector, policies);
     }
 
     // =========================================================================
@@ -145,7 +146,7 @@ class RoutingRequirementAnalyzerTest {
     }
 
     // =========================================================================
-    // Vision Detection: Multimodal vs Pure Text
+    // Vision Detection: Multimodal vs Pure Text vs Historical Isolation (Phase 3.1)
     // =========================================================================
 
     @Test
@@ -157,52 +158,94 @@ class RoutingRequirementAnalyzerTest {
     }
 
     @Test
-    void visionDetection_multimodalInlineData_triggersVisionRequired() {
+    void visionDetection_currentUserImage_triggersVisionRequired() {
         Part imagePart = Part.builder()
                 .inlineData(Blob.builder().mimeType("image/png").data(new byte[]{1, 2, 3}).build())
                 .build();
-        Content multimodalContent = Content.builder().role("user").parts(List.of(imagePart, Part.fromText("分析图片"))).build();
-        LlmRequest req = LlmRequest.builder().model("test").contents(List.of(multimodalContent)).build();
+        Content multimodalContent = Content.builder().role("user").parts(List.of(imagePart, Part.fromText("结合这张图片分析"))).build();
+        LlmRequest req = request(multimodalContent);
 
         RoutingContext ctx = contextFactory.create(req, "agent_analyst");
         RoutingRequirement reqResult = analyzer.analyze(ctx);
 
-        assertTrue(reqResult.visionRequired(), "Multimodal image part must trigger visionRequired");
+        assertTrue(reqResult.visionRequired(), "Current-turn multimodal image part must trigger visionRequired");
+    }
+
+    @Test
+    void visionDetection_historyImage_currentTextOnly_shouldNotRequireVision() {
+        // Turn 1: User sent image -> Assistant answered
+        Part historyImage = Part.builder()
+                .inlineData(Blob.builder().mimeType("image/png").data(new byte[]{1, 2, 3}).build())
+                .build();
+        Content turn1User = Content.builder().role("user").parts(List.of(historyImage, Part.fromText("分析图片"))).build();
+        Content turn1Assistant = Content.builder().role("model").parts(List.of(Part.fromText("图片分析结果：架构图包含网关与服务层"))).build();
+
+        // Turn 2: Current user sends pure text "修改标题"
+        Content turn2User = Content.builder().role("user").parts(List.of(Part.fromText("修改标题为用户流程"))).build();
+
+        LlmRequest req = request(turn1User, turn1Assistant, turn2User);
+
+        RoutingContext ctx = contextFactory.create(req, "agent_analyst");
+        RoutingRequirement reqResult = analyzer.analyze(ctx);
+
+        assertEquals(TaskType.SIMPLE_EDIT, reqResult.taskType());
+        assertFalse(reqResult.visionRequired(), "Historical image must NOT contaminate current pure-text turn");
+    }
+
+    @Test
+    void visionDetection_assistantHistoricalImage_shouldNotRequireVision() {
+        // Historical assistant generated/attached image
+        Part assistantImg = Part.builder()
+                .inlineData(Blob.builder().mimeType("image/jpeg").data(new byte[]{4, 5}).build())
+                .build();
+        Content turn1User = userContent("生成一张架构图");
+        Content turn1Assistant = Content.builder().role("model").parts(List.of(assistantImg, Part.fromText("已生成图表"))).build();
+        Content turn2User = userContent("修改标题");
+
+        LlmRequest req = request(turn1User, turn1Assistant, turn2User);
+
+        RoutingContext ctx = contextFactory.create(req, "agent_analyst");
+        RoutingRequirement reqResult = analyzer.analyze(ctx);
+
+        assertFalse(reqResult.visionRequired(), "Historical assistant image must NOT contaminate current turn");
     }
 
     // =========================================================================
-    // Context / Complexity Decoupling
+    // Context / Vision Dual Decoupling (Phase 3.1 Comprehensive Regression)
     // =========================================================================
 
     @Test
-    void contextDecoupling_longHistoryDoesNotEscalateTaskComplexity() {
-        // Very large history context (20,000+ chars)
-        String hugeHistoryUser = "历史大量系统需求描述：".repeat(1000);
-        String hugeHistoryModel = "历史模型详细设计输出：".repeat(1500);
+    void contextAndVisionDecoupling_comprehensiveRegression() {
+        // Case A: Short text only, no history
+        LlmRequest reqA = request(userContent("修改标题为系统概览"));
+        RoutingContext ctxA = contextFactory.create(reqA, "agent_analyst");
+        RoutingRequirement reqA_res = analyzer.analyze(ctxA);
 
-        LlmRequest longHistoryReq = LlmRequest.builder()
-                .model("test")
-                .contents(List.of(
-                        userContent(hugeHistoryUser),
-                        assistantContent(hugeHistoryModel),
-                        userContent("修改标题为系统概览")
-                ))
+        // Case B: Same short text, but with massive history and historical image
+        Part historyImage = Part.builder()
+                .inlineData(Blob.builder().mimeType("image/png").data(new byte[]{1, 2, 3}).build())
                 .build();
+        Content turn1User = Content.builder().role("user").parts(List.of(historyImage, Part.fromText("历史长文本描述：".repeat(500)))).build();
+        Content turn1Model = assistantContent("历史模型详细输出：".repeat(800));
+        Content turn2User = userContent("修改标题为系统概览");
 
-        RoutingContext shortContext = contextFactory.create(request(userContent("修改标题为系统概览")), "agent_analyst");
-        RoutingContext longContext = contextFactory.create(longHistoryReq, "agent_analyst");
+        LlmRequest reqB = request(turn1User, turn1Model, turn2User);
+        RoutingContext ctxB = contextFactory.create(reqB, "agent_analyst");
+        RoutingRequirement reqB_res = analyzer.analyze(ctxB);
 
-        RoutingRequirement shortReq = analyzer.analyze(shortContext);
-        RoutingRequirement longReq = analyzer.analyze(longContext);
+        // Assertions:
+        // 1. Task type and reasoning requirements are identical
+        assertEquals(TaskType.SIMPLE_EDIT, reqA_res.taskType());
+        assertEquals(TaskType.SIMPLE_EDIT, reqB_res.taskType());
+        assertEquals(reqA_res.reasoningRequired(), reqB_res.reasoningRequired());
 
-        // Task complexity remains SIMPLE_EDIT and reasoningRequired is identical
-        assertEquals(TaskType.SIMPLE_EDIT, longReq.taskType());
-        assertEquals(shortReq.reasoningRequired(), longReq.reasoningRequired(),
-                "Long conversation history must NOT escalate current task reasoningRequired");
+        // 2. Neither requires vision
+        assertFalse(reqA_res.visionRequired());
+        assertFalse(reqB_res.visionRequired(), "Case B with historical image must NOT require vision");
 
-        // But minContextWindowTokens MUST reflect the full context requirement
-        assertTrue(longReq.minContextWindowTokens() > shortReq.minContextWindowTokens(),
-                "minContextWindowTokens must increase with larger historical context");
+        // 3. But minContextWindowTokens MUST strictly reflect the larger historical context
+        assertTrue(reqB_res.minContextWindowTokens() > reqA_res.minContextWindowTokens(),
+                "minContextWindowTokens in Case B must be strictly larger than Case A");
     }
 
     // =========================================================================

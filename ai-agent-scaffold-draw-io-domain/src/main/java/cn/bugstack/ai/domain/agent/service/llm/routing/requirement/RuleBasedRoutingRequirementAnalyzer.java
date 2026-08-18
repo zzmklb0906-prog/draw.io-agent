@@ -1,9 +1,6 @@
 package cn.bugstack.ai.domain.agent.service.llm.routing.requirement;
 
 import cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContext;
-import com.google.adk.models.LlmRequest;
-import com.google.genai.types.Content;
-import com.google.genai.types.Part;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +13,7 @@ import java.util.List;
  * <p>Constructs capability demands via:
  * <ol>
  *   <li>Task detection on {@code latestUserText} (yielding baseline requirements).</li>
- *   <li>Multimodal Part scanning (detecting true {@code visionRequired}).</li>
+ *   <li>Current-turn Multimodal Vision scanning (strictly on latest user Content).</li>
  *   <li>Context capacity budgeting ({@code minContextWindowTokens} derived from estimated context + expected output).</li>
  *   <li>Agent-specific specialization bias (via {@link AgentRequirementPolicy}).</li>
  * </ol>
@@ -30,11 +27,14 @@ import java.util.List;
 public class RuleBasedRoutingRequirementAnalyzer implements RoutingRequirementAnalyzer {
 
     private final TaskTypeDetector taskTypeDetector;
+    private final CurrentTurnVisionDetector visionDetector;
     private final List<AgentRequirementPolicy> agentPolicies;
 
     public RuleBasedRoutingRequirementAnalyzer(TaskTypeDetector taskTypeDetector,
+                                               CurrentTurnVisionDetector visionDetector,
                                                List<AgentRequirementPolicy> agentPolicies) {
         this.taskTypeDetector = taskTypeDetector;
+        this.visionDetector = visionDetector;
         this.agentPolicies = agentPolicies != null ? agentPolicies : List.of();
     }
 
@@ -48,7 +48,7 @@ public class RuleBasedRoutingRequirementAnalyzer implements RoutingRequirementAn
         TaskTypeDetector.DetectionResult detection = taskTypeDetector.detect(userText);
         TaskType taskType = detection.taskType();
 
-        boolean visionRequired = detectMultimodalVision(context.request());
+        boolean visionRequired = visionDetector != null && visionDetector.requiresVision(context.request());
         BaseDemands baseDemands = resolveBaseDemands(taskType);
 
         long contextTokens = context.estimatedContextTokens();
@@ -90,38 +90,6 @@ public class RuleBasedRoutingRequirementAnalyzer implements RoutingRequirementAn
         }
 
         return base;
-    }
-
-    // -------------------------------------------------------------------------
-    // Multimodal Vision Detection
-    // -------------------------------------------------------------------------
-
-    private boolean detectMultimodalVision(LlmRequest request) {
-        if (request == null || request.contents() == null) {
-            return false;
-        }
-        for (Content content : request.contents()) {
-            if (content == null) continue;
-            List<Part> parts = content.parts().orElse(List.of());
-            for (Part part : parts) {
-                if (part == null) continue;
-                // Check inlineData blob mimeType
-                if (part.inlineData().isPresent()) {
-                    String mime = part.inlineData().get().mimeType().orElse("");
-                    if (mime.toLowerCase().startsWith("image/")) {
-                        return true;
-                    }
-                }
-                // Check fileData mimeType
-                if (part.fileData().isPresent()) {
-                    String mime = part.fileData().get().mimeType().orElse("");
-                    if (mime.toLowerCase().startsWith("image/")) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     // -------------------------------------------------------------------------
