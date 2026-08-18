@@ -1,5 +1,7 @@
 spring:
   config:
     name: ai-agent-scaffold-lite-app
+    import:
+      - optional:classpath:model-catalog.yml
   profiles:
     active: dev

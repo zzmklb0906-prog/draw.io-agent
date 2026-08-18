@@ -19,7 +19,7 @@ import java.util.List;
  *   <li>Iterates contents in reverse order — the last user Content wins.</li>
  *   <li>Concatenates all text Parts within that Content (handles multi-part messages).</li>
  *   <li>Returns an empty string (never throws) when no user Content is found.</li>
- *   <li>Does NOT compute whole-context size; that belongs to {@link RoutingTextInput}.</li>
+ *   <li>Computes whole-context size via {@link #totalContextChars(LlmRequest)} and wraps both into {@link RoutingTextInput}.</li>
  * </ul>
  * </p>
  *
