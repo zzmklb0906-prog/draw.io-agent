@@ -32,7 +32,7 @@ public class ModelCatalogProperties {
         private String provider;
         private String modelName;
         @Builder.Default
-        private boolean enabled = true;
+        private boolean enabled = false;
         private CapabilitiesConfig capabilities;
         private FeaturesConfig features;
         private LimitsConfig limits;

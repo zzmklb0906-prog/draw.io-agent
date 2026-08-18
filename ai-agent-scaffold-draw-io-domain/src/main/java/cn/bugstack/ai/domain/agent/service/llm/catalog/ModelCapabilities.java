@@ -17,8 +17,4 @@ public record ModelCapabilities(
         int toolCalling,
         int vision,
         int longContext
-) {
-    public static ModelCapabilities defaultCapabilities() {
-        return new ModelCapabilities(50, 50, 50, 50, 50, 0, 50);
-    }
-}
+) {}

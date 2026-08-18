@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Unit tests for {@link ModelCatalogService}.
  *
- * <p>Validates loading, querying, and strict boundary validation rules (Cases 1 - 16).</p>
+ * <p>Validates loading, querying, fail-fast boundary rules, and immutability.</p>
  */
 class ModelCatalogServiceTest {
 
@@ -125,6 +125,22 @@ class ModelCatalogServiceTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new ModelCatalogService(props));
         assertTrue(ex.getMessage().contains("provider must not be blank"));
+    }
+
+    // =========================================================================
+    // Fail-fast on missing capabilities config
+    // =========================================================================
+
+    @Test
+    void missingCapabilities_shouldFailFast() {
+        ModelCatalogProperties props = new ModelCatalogProperties();
+        ModelCatalogProperties.ModelConfig config = createValidModel("id-no-cap", "qwen", "model-no-cap", true);
+        config.setCapabilities(null);
+        props.setModels(List.of(config));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new ModelCatalogService(props));
+        assertTrue(ex.getMessage().contains("capabilities must be provided"), "Must fail-fast on null capabilities");
     }
 
     // =========================================================================

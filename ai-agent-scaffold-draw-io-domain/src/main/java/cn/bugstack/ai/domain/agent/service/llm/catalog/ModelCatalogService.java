@@ -141,7 +141,7 @@ public class ModelCatalogService {
 
     private ModelCapabilities convertCapabilities(String id, ModelCatalogProperties.CapabilitiesConfig config) {
         if (config == null) {
-            return ModelCapabilities.defaultCapabilities();
+            throw new IllegalArgumentException(String.format("Invalid model catalog entry [id=%s]: capabilities must be provided", id));
         }
         validateScore(id, "reasoning", config.getReasoning());
         validateScore(id, "instructionFollowing", config.getInstructionFollowing());

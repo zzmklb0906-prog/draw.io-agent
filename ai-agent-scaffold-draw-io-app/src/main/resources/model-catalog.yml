@@ -6,6 +6,7 @@
 # Scores used internally by the agent platform for multi-dimensional intent routing.
 # They are NOT vendor official benchmarks, official capability rankings, or absolute claims.
 #
+# All limits, features, and pricing are strictly aligned with documentation in api-model.md.
 # DO NOT place API keys, passwords, or endpoints in this file.
 # Connection endpoints and credentials are managed separately by ModelProviderRegistry.
 # ==============================================================================
@@ -15,7 +16,7 @@ ai:
     model-catalog:
       models:
         # ----------------------------------------------------------------------
-        # 1. Qwen Series (Active in Current Production Configuration)
+        # 1. Qwen Series (from api-model.md)
         # ----------------------------------------------------------------------
         - id: qwen3.7-flash
           provider: qwen
@@ -27,18 +28,18 @@ ai:
             coding: 65
             structured-output: 80
             tool-calling: 80
-            vision: 0
+            vision: 70
             long-context: 90
           features:
             tool-calling: SUPPORTED
             structured-output: SUPPORTED
-            vision: UNSUPPORTED
+            vision: SUPPORTED
           limits:
             context-window-tokens: 1048576
-            max-output-tokens: 8192
+            max-output-tokens: 131072
           pricing:
-            input-per-million-tokens: 0.00
-            output-per-million-tokens: 0.00
+            input-per-million-tokens: 0.20
+            output-per-million-tokens: 0.80
             currency: CNY
 
         - id: qwen3.7-plus
@@ -51,18 +52,18 @@ ai:
             coding: 80
             structured-output: 88
             tool-calling: 88
-            vision: 0
+            vision: 80
             long-context: 85
           features:
             tool-calling: SUPPORTED
             structured-output: SUPPORTED
-            vision: UNSUPPORTED
+            vision: SUPPORTED
           limits:
-            context-window-tokens: 131072
-            max-output-tokens: 8192
+            context-window-tokens: 1048576
+            max-output-tokens: 131072
           pricing:
-            input-per-million-tokens: 0.80
-            output-per-million-tokens: 2.00
+            input-per-million-tokens: 2.00
+            output-per-million-tokens: 8.00
             currency: CNY
 
         - id: qwen3.8-max
@@ -82,138 +83,138 @@ ai:
             structured-output: SUPPORTED
             vision: SUPPORTED
           limits:
-            context-window-tokens: 131072
-            max-output-tokens: 16384
+            context-window-tokens: 1048576
+            max-output-tokens: 131072
+          pricing:
+            input-per-million-tokens: 12.00
+            output-per-million-tokens: 36.00
+            currency: CNY
+
+        - id: qwen3.7-max
+          provider: qwen
+          model-name: qwen3.7-max
+          enabled: false
+          capabilities:
+            reasoning: 90
+            instruction-following: 92
+            coding: 90
+            structured-output: 92
+            tool-calling: 90
+            vision: 0
+            long-context: 90
+          features:
+            tool-calling: SUPPORTED
+            structured-output: SUPPORTED
+            vision: UNSUPPORTED
+          limits:
+            context-window-tokens: 1048576
+            max-output-tokens: 131072
           pricing:
             input-per-million-tokens: 12.00
             output-per-million-tokens: 36.00
             currency: CNY
 
         # ----------------------------------------------------------------------
-        # 2. DeepSeek Series (Registered in Provider Registry, Disabled for Routing)
+        # 2. DeepSeek Series (from api-model.md)
         # ----------------------------------------------------------------------
-        - id: deepseek-v3
+        - id: deepseek-v4-pro-0813
           provider: deepseek
-          model-name: deepseek-v3
+          model-name: deepseek-v4-pro-0813
           enabled: false
           capabilities:
-            reasoning: 82
-            instruction-following: 88
-            coding: 88
-            structured-output: 85
+            reasoning: 92
+            instruction-following: 90
+            coding: 92
+            structured-output: 88
+            tool-calling: 85
+            vision: 0
+            long-context: 90
+          features:
+            tool-calling: SUPPORTED
+            structured-output: SUPPORTED
+            vision: UNSUPPORTED
+          limits:
+            context-window-tokens: 1048576
+            max-output-tokens: 393216
+          pricing:
+            input-per-million-tokens: 4.50
+            output-per-million-tokens: 13.50
+            currency: CNY
+
+        - id: deepseek-v4-flash-0731
+          provider: deepseek
+          model-name: deepseek-v4-flash-0731
+          enabled: false
+          capabilities:
+            reasoning: 70
+            instruction-following: 85
+            coding: 75
+            structured-output: 80
             tool-calling: 80
             vision: 0
-            long-context: 80
+            long-context: 90
           features:
             tool-calling: SUPPORTED
             structured-output: SUPPORTED
             vision: UNSUPPORTED
           limits:
-            context-window-tokens: 65536
-            max-output-tokens: 8192
+            context-window-tokens: 1048576
+            max-output-tokens: 393216
           pricing:
-            input-per-million-tokens: 1.00
-            output-per-million-tokens: 2.00
-            currency: CNY
-
-        - id: deepseek-r1
-          provider: deepseek
-          model-name: deepseek-r1
-          enabled: false
-          capabilities:
-            reasoning: 95
-            instruction-following: 85
-            coding: 90
-            structured-output: 78
-            tool-calling: 70
-            vision: 0
-            long-context: 80
-          features:
-            tool-calling: SUPPORTED
-            structured-output: SUPPORTED
-            vision: UNSUPPORTED
-          limits:
-            context-window-tokens: 65536
-            max-output-tokens: 8192
-          pricing:
-            input-per-million-tokens: 4.00
-            output-per-million-tokens: 16.00
+            input-per-million-tokens: 1.50
+            output-per-million-tokens: 4.50
             currency: CNY
 
         # ----------------------------------------------------------------------
-        # 3. Zhipu GLM Series (Registered in Provider Registry, Disabled for Routing)
+        # 3. Zhipu GLM Series (from api-model.md)
         # ----------------------------------------------------------------------
-        - id: glm-4-plus
+        - id: glm-5.2
           provider: glm
-          model-name: glm-4-plus
-          enabled: false
-          capabilities:
-            reasoning: 85
-            instruction-following: 90
-            coding: 84
-            structured-output: 88
-            tool-calling: 88
-            vision: 0
-            long-context: 85
-          features:
-            tool-calling: SUPPORTED
-            structured-output: SUPPORTED
-            vision: UNSUPPORTED
-          limits:
-            context-window-tokens: 131072
-            max-output-tokens: 8192
-          pricing:
-            input-per-million-tokens: 10.00
-            output-per-million-tokens: 10.00
-            currency: CNY
-
-        - id: glm-4-flash
-          provider: glm
-          model-name: glm-4-flash
-          enabled: false
-          capabilities:
-            reasoning: 60
-            instruction-following: 80
-            coding: 65
-            structured-output: 75
-            tool-calling: 75
-            vision: 0
-            long-context: 85
-          features:
-            tool-calling: SUPPORTED
-            structured-output: SUPPORTED
-            vision: UNSUPPORTED
-          limits:
-            context-window-tokens: 131072
-            max-output-tokens: 4096
-          pricing:
-            input-per-million-tokens: 0.00
-            output-per-million-tokens: 0.00
-            currency: CNY
-
-        # ----------------------------------------------------------------------
-        # 4. Moonshot / Kimi Series (Registered in Provider Registry, Disabled for Routing)
-        # ----------------------------------------------------------------------
-        - id: kimi-k1.5
-          provider: kimi
-          model-name: kimi-k1.5
+          model-name: glm-5.2
           enabled: false
           capabilities:
             reasoning: 88
             instruction-following: 90
-            coding: 85
-            structured-output: 86
-            tool-calling: 85
-            vision: 75
-            long-context: 95
+            coding: 88
+            structured-output: 88
+            tool-calling: 88
+            vision: 0
+            long-context: 90
+          features:
+            tool-calling: SUPPORTED
+            structured-output: SUPPORTED
+            vision: UNSUPPORTED
+          limits:
+            context-window-tokens: 1048576
+            max-output-tokens: 131072
+          pricing:
+            input-per-million-tokens: 8.00
+            output-per-million-tokens: 28.00
+            currency: CNY
+
+        # ----------------------------------------------------------------------
+        # 4. Moonshot / Kimi Series (from api-model.md)
+        # ----------------------------------------------------------------------
+        - id: kimi-k2.7-code
+          provider: kimi
+          model-name: kimi-k2.7-code
+          enabled: false
+          capabilities:
+            reasoning: 88
+            instruction-following: 90
+            coding: 95
+            structured-output: 88
+            tool-calling: 88
+            vision: 80
+            long-context: 80
           features:
             tool-calling: SUPPORTED
             structured-output: SUPPORTED
             vision: SUPPORTED
           limits:
-            context-window-tokens: 131072
-            max-output-tokens: 8192
+            context-window-tokens: 262144
+            max-output-tokens: 16384
           pricing:
-            input-per-million-tokens: 12.00
-            output-per-million-tokens: 12.00
+            input-per-million-tokens: 6.50
+            output-per-million-tokens: 27.00
             currency: CNY
