@@ -29,13 +29,15 @@ public class CustomConfigPlugin extends BasePlugin {
     private final cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.scoring.DynamicModelRankingService dynamicRankingService;
 
     public CustomConfigPlugin(ModelRoutingService modelRoutingService,
                               LightweightMonitorService monitorService,
                               ModelProviderRegistryService providerRegistryService,
                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory,
                               cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService,
-                              cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService) {
+                              cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService,
+                              cn.bugstack.ai.domain.agent.service.llm.routing.scoring.DynamicModelRankingService dynamicRankingService) {
         super("CustomConfigPlugin");
         this.modelRoutingService = modelRoutingService;
         this.monitorService = monitorService;
@@ -43,6 +45,7 @@ public class CustomConfigPlugin extends BasePlugin {
         this.routingContextFactory = routingContextFactory;
         this.requirementService = requirementService;
         this.constraintFilteringService = constraintFilteringService;
+        this.dynamicRankingService = dynamicRankingService;
     }
 
     @Override
@@ -53,8 +56,10 @@ public class CustomConfigPlugin extends BasePlugin {
         boolean explicitModel = config != null && config.isCustomModelSelected() && StringUtils.isNotBlank(config.getModel());
         String finalModel = requestBuilder.build().model().orElse("");
         String activeAgent = monitorService.activeAgentName(context.invocationId());
+        String shadowRecommendedModel = null;
+        Double shadowTopScore = null;
 
-        // Shadow Mode: Phase 3 Requirement & Phase 4 Hard Constraint Filter (observation only, does NOT alter model selection)
+        // Shadow Mode: Phase 3 Requirement, Phase 4 Filter & Phase 5 Ranking (observation only, does NOT alter model selection)
         try {
             var routingContext = routingContextFactory.create(
                     requestBuilder.build(),
@@ -63,18 +68,27 @@ public class CustomConfigPlugin extends BasePlugin {
                     explicitModel,
                     explicitModel ? config.getModel() : null
             );
-            requirementService.tryAnalyze(routingContext).ifPresent(requirement -> {
+            var reqOpt = requirementService.tryAnalyze(routingContext);
+            if (reqOpt.isPresent()) {
+                var requirement = reqOpt.get();
                 var filterResult = constraintFilteringService.filter(requirement);
-                var acceptedNames = filterResult.accepted().stream().map(m -> m.modelName()).toList();
-                var rejectedSummary = filterResult.rejected().stream()
-                        .map(r -> r.model().modelName() + ":" + r.violations().stream().map(v -> v.reason().name()).toList())
+                var rankingResult = dynamicRankingService.rank(requirement, filterResult);
+
+                if (rankingResult.topCandidate().isPresent()) {
+                    var top = rankingResult.topCandidate().get();
+                    shadowRecommendedModel = top.model().modelName();
+                    shadowTopScore = top.totalScore();
+                }
+
+                var rankingSummary = rankingResult.rankedCandidates().stream()
+                        .map(cs -> String.format("%s:%.2f", cs.model().modelName(), cs.totalScore()))
                         .toList();
 
-                log.debug("Shadow Hard Constraint Filter [invocationId={}]: taskType={}, accepted={}, rejected={}",
-                        context.invocationId(), requirement.taskType(), acceptedNames, rejectedSummary);
-            });
+                log.debug("Shadow Dynamic Ranking [invocationId={}]: taskType={}, recommended={}, topScore={}, ranking={}",
+                        context.invocationId(), requirement.taskType(), shadowRecommendedModel, shadowTopScore, rankingSummary);
+            }
         } catch (Exception e) {
-            log.warn("Shadow constraint filtering skipped due to exception: {}", e.getMessage());
+            log.warn("Shadow dynamic ranking skipped due to exception: {}", e.getMessage());
         }
 
         if (!explicitModel) {
