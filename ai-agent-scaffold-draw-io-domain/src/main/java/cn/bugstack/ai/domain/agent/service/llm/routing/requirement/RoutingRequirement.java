@@ -19,4 +19,42 @@ public record RoutingRequirement(
         long expectedOutputTokens,
         String agentName,
         RequirementEvidence evidence
-) {}
+) {
+    public boolean needToolCalling() {
+        return toolCallingRequired > 0;
+    }
+
+    public boolean needStructuredOutput() {
+        return structuredOutputRequired > 0;
+    }
+
+    public boolean needVision() {
+        return visionRequired;
+    }
+
+    public boolean needLongContext() {
+        return minContextWindowTokens > 16_384;
+    }
+
+    public int estimatedComplexity() {
+        if (reasoningRequired >= 65) return 3;
+        if (reasoningRequired <= 25) return 1;
+        return 2;
+    }
+
+    public static RoutingRequirement defaultRequirement(String agentName) {
+        return new RoutingRequirement(
+                TaskType.GENERAL_CHAT,
+                30,
+                50,
+                20,
+                0,
+                0,
+                false,
+                4096L,
+                2048L,
+                agentName != null ? agentName : "unknown",
+                RequirementEvidence.empty()
+        );
+    }
+}

@@ -23,4 +23,27 @@ public record ModelProfile(
         ModelFeatures features,
         ModelLimits limits,
         ModelPricing pricing
-) {}
+) {
+    public boolean supportsToolCalling() {
+        return features != null && features.toolCalling() == SupportStatus.SUPPORTED
+                || (capabilities != null && capabilities.toolCalling() > 0);
+    }
+
+    public boolean supportsVision() {
+        return features != null && features.vision() == SupportStatus.SUPPORTED
+                || (capabilities != null && capabilities.vision() > 0);
+    }
+
+    public boolean supportsStructuredOutput() {
+        return features != null && features.structuredOutput() == SupportStatus.SUPPORTED
+                || (capabilities != null && capabilities.structuredOutput() > 0);
+    }
+
+    public long contextWindow() {
+        return limits != null ? limits.contextWindowTokens() : 0L;
+    }
+
+    public long maxOutputTokens() {
+        return limits != null ? limits.maxOutputTokens() : 0L;
+    }
+}

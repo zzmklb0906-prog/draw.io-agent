@@ -26,6 +26,7 @@ public class ModelRoutingService {
     private final String reasoningModel;
     private final Map<String, IModelRouterStrategy> strategyMap;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory;
+    private final cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService;
 
     public ModelRoutingService(@Value("${ai.agent.model-routing.enabled:true}") boolean enabled,
                                @Value("${ai.agent.model-routing.strategy:composite}") String strategyName,
@@ -33,7 +34,8 @@ public class ModelRoutingService {
                                @Value("${ai.agent.model-routing.balanced-model:}") String balancedModel,
                                @Value("${ai.agent.model-routing.reasoning-model:}") String reasoningModel,
                                List<IModelRouterStrategy> strategies,
-                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory) {
+                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
+                               cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService) {
         this.enabled = enabled;
         this.strategyName = strategyName;
         this.fastModel = fastModel;
@@ -41,6 +43,17 @@ public class ModelRoutingService {
         this.reasoningModel = reasoningModel;
         this.strategyMap = strategies.stream().collect(Collectors.toMap(IModelRouterStrategy::strategyName, Function.identity(), (a, b) -> a));
         this.contextFactory = contextFactory != null ? contextFactory : createDefaultFactory();
+        this.modelCatalogService = modelCatalogService;
+    }
+
+    public ModelRoutingService(boolean enabled,
+                               String strategyName,
+                               String fastModel,
+                               String balancedModel,
+                               String reasoningModel,
+                               List<IModelRouterStrategy> strategies,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory) {
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -49,7 +62,11 @@ public class ModelRoutingService {
                                String balancedModel,
                                String reasoningModel,
                                List<IModelRouterStrategy> strategies) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, null, null);
+    }
+
+    public cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService getModelCatalogService() {
+        return modelCatalogService;
     }
 
     /**

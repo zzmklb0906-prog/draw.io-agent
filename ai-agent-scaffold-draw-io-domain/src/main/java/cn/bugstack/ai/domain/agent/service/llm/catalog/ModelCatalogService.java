@@ -45,10 +45,10 @@ public class ModelCatalogService {
             }
         }
 
-        this.allProfiles = List.copyOf(loaded);
-        this.enabledProfiles = List.copyOf(loaded.stream().filter(ModelProfile::enabled).toList());
-        this.idIndex = Collections.unmodifiableMap(byId);
-        this.modelNameIndex = Collections.unmodifiableMap(byModelName);
+        this.allProfiles = new java.util.concurrent.CopyOnWriteArrayList<>(loaded);
+        this.enabledProfiles = new java.util.concurrent.CopyOnWriteArrayList<>(loaded.stream().filter(ModelProfile::enabled).toList());
+        this.idIndex = new ConcurrentHashMap<>(byId);
+        this.modelNameIndex = new ConcurrentHashMap<>(byModelName);
 
         log.info("Model Catalog initialized with {} models ({} enabled)", allProfiles.size(), enabledProfiles.size());
     }
@@ -57,14 +57,22 @@ public class ModelCatalogService {
      * Returns an unmodifiable list of all registered model profiles.
      */
     public List<ModelProfile> getAllModels() {
-        return allProfiles;
+        return Collections.unmodifiableList(allProfiles);
     }
 
     /**
      * Returns an unmodifiable list of all enabled model profiles.
      */
     public List<ModelProfile> getEnabledModels() {
-        return enabledProfiles;
+        return Collections.unmodifiableList(enabledProfiles);
+    }
+
+    /**
+     * Returns an unmodifiable list of all available (enabled) model profiles.
+     * Alias for {@link #getEnabledModels()} as required by Phase 2 Model Catalog contract.
+     */
+    public List<ModelProfile> getAvailableModels() {
+        return getEnabledModels();
     }
 
     /**
@@ -85,6 +93,25 @@ public class ModelCatalogService {
             return Optional.empty();
         }
         return Optional.ofNullable(modelNameIndex.get(modelName.trim().toLowerCase()));
+    }
+
+    /**
+     * Dynamically registers a {@link ModelProfile} into the in-memory catalog.
+     */
+    public synchronized void registerModel(ModelProfile profile) {
+        if (profile == null) {
+            throw new IllegalArgumentException("Model profile cannot be null");
+        }
+        allProfiles.removeIf(p -> p.id().equalsIgnoreCase(profile.id()));
+        allProfiles.add(profile);
+        enabledProfiles.removeIf(p -> p.id().equalsIgnoreCase(profile.id()));
+        if (profile.enabled()) {
+            enabledProfiles.add(profile);
+        }
+        idIndex.put(profile.id().toLowerCase(), profile);
+        modelNameIndex.put(profile.modelName().toLowerCase(), profile);
+        log.info("Dynamically registered model profile [id={}, modelName={}, enabled={}]",
+                profile.id(), profile.modelName(), profile.enabled());
     }
 
     // -------------------------------------------------------------------------
