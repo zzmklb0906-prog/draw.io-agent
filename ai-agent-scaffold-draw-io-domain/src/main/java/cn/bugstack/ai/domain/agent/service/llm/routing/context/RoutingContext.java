@@ -46,4 +46,12 @@ public record RoutingContext(
     public int inputLength() {
         return latestUserText != null ? latestUserText.length() : 0;
     }
+
+    /**
+     * Deterministic invocation identifier derived from context signals.
+     */
+    public String requestId() {
+        String base = (agentName != null ? agentName : "default") + ":" + (latestUserText != null ? latestUserText : "");
+        return Integer.toHexString(base.hashCode());
+    }
 }
