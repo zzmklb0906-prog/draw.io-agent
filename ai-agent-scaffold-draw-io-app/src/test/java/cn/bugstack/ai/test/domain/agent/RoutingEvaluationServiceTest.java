@@ -244,6 +244,41 @@ class RoutingEvaluationServiceTest {
     }
 
     @Test
+    void catalogLookupFailure_doesNotMarkActualModelNotInCatalog() {
+        ModelCatalogService brokenCatalog = new ModelCatalogService(new ModelCatalogProperties()) {
+            @Override
+            public Optional<ModelProfile> findByModelName(String modelName) {
+                throw new RuntimeException("Catalog DB Connection Timeout");
+            }
+            @Override
+            public Optional<ModelProfile> findById(String id) {
+                throw new RuntimeException("Catalog DB Connection Timeout");
+            }
+        };
+
+        RoutingEvaluationService localService = new RoutingEvaluationService(List.of(), new WeightedModelScorer(new ModelScoringProperties()), brokenCatalog);
+        RoutingContext ctx = createContext("agent_analyst");
+        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
+
+        RankingResult ranking = new RankingResult(List.of(createCandidateScore(qwenPlus, 90.0, 0.05)));
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenPlus), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.7-plus", true, 90.0, SelectionSource.LEGACY_ROUTER);
+
+        RoutingEvaluationRecord record = localService.buildRecord("inv-lookup-fail", ctx, req, filterResult, ranking, comparison);
+
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.CATALOG_LOOKUP_FAILED),
+                "Catalog lookup exception must be flagged as CATALOG_LOOKUP_FAILED");
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG),
+                "Lookup failure must NOT be falsely flagged as ACTUAL_MODEL_NOT_IN_CATALOG");
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE),
+                "Lookup failure must NOT be falsely flagged as PRICING_UNAVAILABLE");
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE),
+                "Cost comparison should be unavailable when actual cost cannot be computed");
+        assertNull(record.estimatedActualCost());
+        assertNull(record.costDelta());
+    }
+
+    @Test
     void tryRecord_recorderThrowsException_failsSilentlyWithoutThrowing() {
         RoutingEvaluationRecorder brokenRecorder = record -> {
             throw new RuntimeException("DB Connection Timeout");

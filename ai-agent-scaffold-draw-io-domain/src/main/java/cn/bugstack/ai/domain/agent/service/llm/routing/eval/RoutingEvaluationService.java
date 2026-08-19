@@ -118,25 +118,28 @@ public class RoutingEvaluationService {
         }
 
         // Independent actual model catalog lookup & cost estimation
-        Optional<ModelProfile> actualProfileOpt = findCatalogProfile(actualModel);
+        CatalogLookupResult actualLookup = findCatalogProfile(actualModel);
         boolean actualPricingMissing = false;
         boolean actualNotInCatalog = false;
+        boolean catalogLookupFailed = false;
 
         if (StringUtils.isNotBlank(actualModel)) {
-            if (actualProfileOpt.isPresent()) {
-                ModelProfile actualProfile = actualProfileOpt.get();
-                if (hasPricing(actualProfile)) {
-                    double cost = modelScorer.estimateCost(requirement, actualProfile);
-                    if (cost >= 0.0) {
-                        estActualCost = cost;
+            switch (actualLookup.status()) {
+                case FOUND -> {
+                    ModelProfile actualProfile = actualLookup.profile();
+                    if (hasPricing(actualProfile)) {
+                        double cost = modelScorer.estimateCost(requirement, actualProfile);
+                        if (cost >= 0.0) {
+                            estActualCost = cost;
+                        } else {
+                            actualPricingMissing = true;
+                        }
                     } else {
                         actualPricingMissing = true;
                     }
-                } else {
-                    actualPricingMissing = true;
                 }
-            } else {
-                actualNotInCatalog = true;
+                case NOT_FOUND -> actualNotInCatalog = true;
+                case LOOKUP_FAILED -> catalogLookupFailed = true;
             }
         }
 
@@ -166,6 +169,9 @@ public class RoutingEvaluationService {
 
         if (actualNotInCatalog) {
             flags.add(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG);
+        }
+        if (catalogLookupFailed) {
+            flags.add(RoutingEvaluationFlag.CATALOG_LOOKUP_FAILED);
         }
 
         // Check if actualModel was rejected by Hard Constraint Filter
@@ -245,16 +251,17 @@ public class RoutingEvaluationService {
         }
     }
 
-    private Optional<ModelProfile> findCatalogProfile(String modelNameOrId) {
+    private CatalogLookupResult findCatalogProfile(String modelNameOrId) {
         if (modelCatalogService == null || StringUtils.isBlank(modelNameOrId)) {
-            return Optional.empty();
+            return CatalogLookupResult.notFound();
         }
         try {
-            return modelCatalogService.findByModelName(modelNameOrId)
+            Optional<ModelProfile> opt = modelCatalogService.findByModelName(modelNameOrId)
                     .or(() -> modelCatalogService.findById(modelNameOrId));
+            return opt.map(CatalogLookupResult::found).orElseGet(CatalogLookupResult::notFound);
         } catch (Exception e) {
             log.warn("Failed to lookup model [{}] in catalog: {}", modelNameOrId, e.getMessage());
-            return Optional.empty();
+            return CatalogLookupResult.failed();
         }
     }
 
@@ -263,5 +270,28 @@ public class RoutingEvaluationService {
                 && profile.pricing() != null
                 && profile.pricing().inputPerMillionTokens() != null
                 && profile.pricing().outputPerMillionTokens() != null;
+    }
+
+    private enum CatalogLookupStatus {
+        FOUND,
+        NOT_FOUND,
+        LOOKUP_FAILED
+    }
+
+    private record CatalogLookupResult(
+            CatalogLookupStatus status,
+            ModelProfile profile
+    ) {
+        public static CatalogLookupResult found(ModelProfile profile) {
+            return new CatalogLookupResult(CatalogLookupStatus.FOUND, profile);
+        }
+
+        public static CatalogLookupResult notFound() {
+            return new CatalogLookupResult(CatalogLookupStatus.NOT_FOUND, null);
+        }
+
+        public static CatalogLookupResult failed() {
+            return new CatalogLookupResult(CatalogLookupStatus.LOOKUP_FAILED, null);
+        }
     }
 }
