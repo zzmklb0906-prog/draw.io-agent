@@ -279,6 +279,30 @@ class RoutingEvaluationServiceTest {
     }
 
     @Test
+    void catalogServiceUnavailable_isLookupFailedNotNotFound() {
+        // modelCatalogService is null (service unavailable)
+        RoutingEvaluationService localService = new RoutingEvaluationService(List.of(), new WeightedModelScorer(new ModelScoringProperties()), null);
+        RoutingContext ctx = createContext("agent_analyst");
+        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
+
+        RankingResult ranking = new RankingResult(List.of(createCandidateScore(qwenPlus, 90.0, 0.05)));
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenPlus), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.7-plus", true, 90.0, SelectionSource.LEGACY_ROUTER);
+
+        RoutingEvaluationRecord record = localService.buildRecord("inv-svc-null", ctx, req, filterResult, ranking, comparison);
+
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.CATALOG_LOOKUP_FAILED),
+                "Null catalog service must produce CATALOG_LOOKUP_FAILED");
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG),
+                "Null catalog service must NOT produce ACTUAL_MODEL_NOT_IN_CATALOG");
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE),
+                "Null catalog service must NOT produce PRICING_UNAVAILABLE");
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE));
+        assertNull(record.estimatedActualCost());
+        assertNull(record.costDelta());
+    }
+
+    @Test
     void tryRecord_recorderThrowsException_failsSilentlyWithoutThrowing() {
         RoutingEvaluationRecorder brokenRecorder = record -> {
             throw new RuntimeException("DB Connection Timeout");

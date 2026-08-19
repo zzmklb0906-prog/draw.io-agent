@@ -252,8 +252,11 @@ public class RoutingEvaluationService {
     }
 
     private CatalogLookupResult findCatalogProfile(String modelNameOrId) {
-        if (modelCatalogService == null || StringUtils.isBlank(modelNameOrId)) {
+        if (StringUtils.isBlank(modelNameOrId)) {
             return CatalogLookupResult.notFound();
+        }
+        if (modelCatalogService == null) {
+            return CatalogLookupResult.failed();
         }
         try {
             Optional<ModelProfile> opt = modelCatalogService.findByModelName(modelNameOrId)
