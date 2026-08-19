@@ -27,6 +27,7 @@ public class ModelRoutingService {
     private final Map<String, IModelRouterStrategy> strategyMap;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory;
     private final cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector candidateModelSelector;
 
     public ModelRoutingService(@Value("${ai.agent.model-routing.enabled:true}") boolean enabled,
                                @Value("${ai.agent.model-routing.strategy:composite}") String strategyName,
@@ -35,7 +36,8 @@ public class ModelRoutingService {
                                @Value("${ai.agent.model-routing.reasoning-model:}") String reasoningModel,
                                List<IModelRouterStrategy> strategies,
                                cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
-                               cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService) {
+                               cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector candidateModelSelector) {
         this.enabled = enabled;
         this.strategyName = strategyName;
         this.fastModel = fastModel;
@@ -44,6 +46,18 @@ public class ModelRoutingService {
         this.strategyMap = strategies.stream().collect(Collectors.toMap(IModelRouterStrategy::strategyName, Function.identity(), (a, b) -> a));
         this.contextFactory = contextFactory != null ? contextFactory : createDefaultFactory();
         this.modelCatalogService = modelCatalogService;
+        this.candidateModelSelector = candidateModelSelector;
+    }
+
+    public ModelRoutingService(boolean enabled,
+                               String strategyName,
+                               String fastModel,
+                               String balancedModel,
+                               String reasoningModel,
+                               List<IModelRouterStrategy> strategies,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
+                               cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService) {
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, modelCatalogService, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -53,7 +67,7 @@ public class ModelRoutingService {
                                String reasoningModel,
                                List<IModelRouterStrategy> strategies,
                                cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, null, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -62,11 +76,15 @@ public class ModelRoutingService {
                                String balancedModel,
                                String reasoningModel,
                                List<IModelRouterStrategy> strategies) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, null, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, null, null, null);
     }
 
     public cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService getModelCatalogService() {
         return modelCatalogService;
+    }
+
+    public cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector getCandidateModelSelector() {
+        return candidateModelSelector;
     }
 
     /**
