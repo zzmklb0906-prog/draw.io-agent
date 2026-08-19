@@ -201,16 +201,16 @@
 - [ ] Flyway 重复启动不会重复执行迁移。
 - [ ] 数据库中不存在明文 API Key、密码或完整敏感 Tool Result。
 
-## 14. 多策略模型自动路由测试（方案1 语义向量 & 方案2 SLM分类器）
+## 14. 多策略模型自动路由测试（方案1 启发式语义路由 & 方案2 规则分类器）
 
 - [x] **策略模式单元测试断言 (`IModelRouterStrategy`)**：运行 `ModelRoutingServiceTest` 验证 `semantic`、`classifier` 与 `composite` 智能路由策略全系跑通（`3 tests, 0 failures`）。
-- [ ] **方案 1 语义特征向量路由断言 (`SemanticVectorModelRouter`)**：
-  - 发送语义包含“算法导论、分布式一致性、状态机 checkpoint 与架构重构”的请求，验证加权向量匹配度得出 `SEMANTIC_VECTOR_HIGH_REASONING` 并路由至 `reasoning-model`（如 `deepseek-v4-pro-0813` 或 `qwen3.8-max`）。
+- [ ] **方案 1 启发式语义路由断言 (`SemanticVectorModelRouter` / Heuristic Semantic Router)**：
+  - 发送语义包含“算法导论、分布式一致性、状态机 checkpoint 与架构重构”的请求，验证关键词密度评分加权与饱和度计算得出 `SEMANTIC_VECTOR_HIGH_REASONING` 并路由至 `reasoning-model`（如 `deepseek-v4-pro-0813` 或 `qwen3.8-max`）。
   - 发送语义包含“格式化整理、段落摘要、多语言校验与翻译”的短文本，验证路由得出 `SEMANTIC_VECTOR_LOW_COMPLEXITY` 并路由至 `fast-model`（如 `qwen3.7-flash`）。
-- [ ] **方案 2 SLM 动态小模型分类断言 (`LlmClassifierModelRouter`)**：
-  - 发送开放域复杂提问，验证前置轻量小模型通过结构化 JSON 意图预判输出 Complexity=3，Reason 记录为 `SLM_CLASSIFIER: High architectural & reasoning demand`。
+- [ ] **方案 2 规则分类器断言 (`LlmClassifierModelRouter` / Rule-Based Classifier)**：
+  - 发送开放域复杂提问，验证基于字符长度与关键词特征模式的启发式规则预判输出 Complexity=3，Reason 记录为 `HEURISTIC_CLASSIFIER: High complexity keywords detected in current message`。
 - [ ] **组合智能路由与兜底断言 (`CompositeModelRouter`)**：
-  - 验证多层级 Pipeline（Tier 1 语义向量 -> Tier 2 SLM 预判 -> Tier 3 规则兜底）按优先级流畅运行。
+  - 验证多层级 Pipeline（Tier 1 启发式语义分析 -> Tier 2 规则分类器 -> Tier 3 规则兜底）按优先级流畅运行。
 - [ ] **用户显式选择最优先断言 (`USER_EXPLICIT`)**：
   - 在前端下拉框显式指定 `kimi-k2.7-code` 或 `glm-5.2`，验证自动路由策略被安全跳过，实际调用模型与用户指定一致，Reason 记录为 `USER_EXPLICIT`。
 - [ ] **多 Model Provider 兼容性断言**：

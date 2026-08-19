@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 
 /**
  * Universal Multi-Strategy Model Routing Service.
- * Supports rule, semantic vector, SLM classifier and composite routing strategies.
+ * Supports rule-based, heuristic semantic router, rule-based classifier, and composite routing strategies.
  */
 @Slf4j
 @Service

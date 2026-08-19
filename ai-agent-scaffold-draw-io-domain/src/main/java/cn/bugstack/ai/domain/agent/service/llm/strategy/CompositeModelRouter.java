@@ -18,9 +18,9 @@ import java.util.Map;
  * <p>Routes the LLM request through three fallback tiers in sequence.
  * Each tier may short-circuit if it produces a decisive L1 or L3 verdict.
  *
- * <p>Tier 1: Keyword-density heuristic ({@link SemanticVectorModelRouter})
- * <p>Tier 2: Structural intent heuristic ({@link LlmClassifierModelRouter})
- * <p>Tier 3: Rule-based fallback ({@link RuleBasedModelRouter})
+ * <p>Tier 1: Heuristic Semantic Router ({@link SemanticVectorModelRouter})
+ * <p>Tier 2: Rule-Based Classifier ({@link LlmClassifierModelRouter})
+ * <p>Tier 3: Rule-Based Fallback ({@link RuleBasedModelRouter})
  *
  * <p><strong>Phase 1 fix:</strong>
  * Uses {@link LatestUserMessageExtractor} to build a single {@link RoutingTextInput},
@@ -50,18 +50,18 @@ public class CompositeModelRouter implements IModelRouterStrategy {
         RoutingTextInput input = extractor.buildRoutingInput(request);
         List<Map<String, Object>> pipelineTrail = new ArrayList<>();
 
-        // Tier 1: Keyword-density heuristic check
+        // Tier 1: Heuristic semantic analysis (keyword-density based)
         ModelRoutingService.Decision semanticDecision = semanticRouter.routeFromInput(input, fastModel, balancedModel, reasoningModel);
         Map<String, Object> tier1 = new LinkedHashMap<>();
-        tier1.put("tier", "Tier 1: 关键词密度启发式分析");
-        tier1.put("strategy", "semanticVectorModelRouter (keyword-density heuristic)");
+        tier1.put("tier", "Tier 1: 启发式语义分析 (Heuristic Semantic Router)");
+        tier1.put("strategy", "heuristicSemanticModelRouter (keyword-density heuristic, NOT an embedding vector)");
         tier1.put("complexity", semanticDecision.complexity());
         tier1.put("score", semanticDecision.metrics().getOrDefault("finalReasoningScore", 0));
         tier1.put("matchedKeywords", semanticDecision.matchedKeywords());
 
         if (semanticDecision.complexity() == 3 || semanticDecision.complexity() == 1) {
             tier1.put("status", "HIT");
-            tier1.put("detail", "关键词密度评分命中 L" + semanticDecision.complexity() + " 阈值，选定模型 " + semanticDecision.model());
+            tier1.put("detail", "启发式语义评分命中 L" + semanticDecision.complexity() + " 阈值，选定模型 " + semanticDecision.model());
             pipelineTrail.add(tier1);
             return new ModelRoutingService.Decision(
                     semanticDecision.model(),
@@ -74,15 +74,15 @@ public class CompositeModelRouter implements IModelRouterStrategy {
             );
         } else {
             tier1.put("status", "PASSED");
-            tier1.put("detail", "关键词密度评分未达 L1/L3 极值阈值，流转至下一级");
+            tier1.put("detail", "启发式语义评分未达 L1/L3 极值阈值，流转至下一级");
             pipelineTrail.add(tier1);
         }
 
-        // Tier 2: Structural intent heuristic check
+        // Tier 2: Rule-based classifier (length and keyword intent heuristics)
         ModelRoutingService.Decision classifierDecision = classifierRouter.routeFromInput(input, fastModel, balancedModel, reasoningModel);
         Map<String, Object> tier2 = new LinkedHashMap<>();
-        tier2.put("tier", "Tier 2: 结构化意图启发式分类");
-        tier2.put("strategy", "llmClassifierModelRouter (rule-based heuristic, NOT an SLM)");
+        tier2.put("tier", "Tier 2: 规则分类器 (Rule-Based Classifier)");
+        tier2.put("strategy", "ruleBasedClassifierModelRouter (rule-based intent heuristic, NOT an SLM)");
         tier2.put("complexity", classifierDecision.complexity());
 
         if (classifierDecision.complexity() == 3 || classifierDecision.complexity() == 1) {

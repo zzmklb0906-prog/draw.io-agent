@@ -12,22 +12,20 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Heuristic intent-complexity classifier router (legacy Tier 2).
+ * Rule-Based Classifier (Heuristic Intent & Length Rules).
  *
- * <p><strong>IMPORTANT — Phase 1 note:</strong>
- * The class name "LlmClassifier" and method name {@code evaluateWithSlm()} are legacy
- * misnomers. This class does <em>NOT</em> call an SLM (Small Language Model) or any LLM.
- * It is a rule-based heuristic classifier using character-length thresholds and keyword
- * matching — functionally equivalent to a simplified version of
- * {@link SemanticVectorModelRouter}.
+ * <p><strong>Design & Implementation Reality:</strong>
+ * This class implements a <em>Rule-Based Classifier</em> using character-length thresholds
+ * and intent keyword pattern matching. It does <strong>NOT</strong> call an SLM (Small Language Model)
+ * or any LLM model.
+ * The class name "LlmClassifierModelRouter" is retained for backward compatibility.
  *
- * <p>This class will be renamed and refactored in a future phase once a real
- * SLM/LLM-based intent classifier is integrated. At that point the SLM output
- * should produce capability requirement scores (not direct model names).
- *
- * <p><strong>Phase 1 fix:</strong> Uses {@link LatestUserMessageExtractor} so that
- * {@code evaluateWithSlm()} only sees the latest user message, not the full
- * conversation history.
+ * <p>Core algorithm:
+ * <ul>
+ *   <li>Length &gt; 8000 or (Length &gt; 500 and hasComplexKeywords and not hasSimpleKeywords) &rarr; L3 (Reasoning)</li>
+ *   <li>Length &lt; 1500 and hasSimpleKeywords and not hasComplexKeywords &rarr; L1 (Fast)</li>
+ *   <li>Otherwise &rarr; L2 (Balanced)</li>
+ * </ul>
  */
 @Slf4j
 @Component("llmClassifierModelRouter")
@@ -96,10 +94,10 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
     }
 
     /**
-     * Rule-based heuristic classifier.
+     * Rule-based heuristic classification (length & keyword pattern matching).
      *
-     * <p><strong>NOT an SLM/LLM call.</strong> The method name is a legacy misnomer.
-     * This is a pure if-else heuristic operating on {@code latestUserText} only.
+     * <p><strong>Design Reality:</strong>
+     * Pure if-else heuristic operating on {@code latestUserText} only without calling external SLM/LLM models.
      *
      * @param latestUserText the current user message only
      */

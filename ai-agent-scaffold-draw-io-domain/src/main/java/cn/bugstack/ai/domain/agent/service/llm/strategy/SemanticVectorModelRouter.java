@@ -13,31 +13,30 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Keyword-density heuristic router (legacy).
+ * Heuristic Semantic Router (Keyword-density based).
  *
- * <p><strong>IMPORTANT — Phase 1 note:</strong>
- * This class is a <em>keyword-density heuristic</em>, NOT a real embedding / vector
- * semantic router. It does NOT use an Embedding model, vector representations,
- * cosine similarity, or a trained classifier. The name "SemanticVector" is a legacy
- * misnomer and will be addressed in a future refactoring phase.
+ * <p><strong>Design & Implementation Reality:</strong>
+ * This class implements a <em>Heuristic Semantic Router</em> based on keyword-density scoring.
+ * It does <strong>NOT</strong> use an Embedding model, Vector Search, Vector Database,
+ * Cosine Similarity, or a trained deep-learning classifier.
+ * The class name "SemanticVectorModelRouter" is retained for backward compatibility.
  *
  * <p>Core algorithm:
  * <ol>
- *   <li>Scan {@code latestUserText} (Phase 1 fix: was the full conversation history) for
- *       domain keywords and accumulate a weighted score.</li>
+ *   <li>Scan {@code latestUserText} for domain keywords and accumulate a weighted score.</li>
  *   <li>Apply a Poisson-style saturation: {@code score = 1 - exp(-accumulatedWeight)}
  *       so that a single keyword cannot saturate to 1.0.</li>
  *   <li>Combine with a log-scaled task-length factor (using {@code latestUserText.length()},
- *       NOT the conversation history, avoiding length contamination from multi-turn chats).</li>
+ *       avoiding length contamination from multi-turn chats).</li>
  *   <li>Compare to fixed thresholds to select L1 / L2 / L3 tier.</li>
  * </ol>
  *
- * <p>Known limitations (to be fixed in Phase 2+):
+ * <p>Known limitations (to be fixed in future Capability-aware Dynamic Router phases):
  * <ul>
  *   <li>Cannot detect negation ("不需要架构分析") — treats negated keywords the same as affirmed ones.</li>
  *   <li>Single keyword with weight 0.9 can push score above 0.45 threshold when combined with
- *       task-length factor — see threshold discussion in the refactor guide.</li>
- *   <li>Substring matching only — no synonym or semantic awareness.</li>
+ *       task-length factor.</li>
+ *   <li>Substring matching only — no synonym or semantic vector awareness.</li>
  * </ul>
  */
 @Slf4j
