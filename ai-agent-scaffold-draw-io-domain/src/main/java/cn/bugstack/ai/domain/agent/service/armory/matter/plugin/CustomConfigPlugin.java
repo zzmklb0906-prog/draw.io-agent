@@ -28,18 +28,21 @@ public class CustomConfigPlugin extends BasePlugin {
     private final ModelProviderRegistryService providerRegistryService;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService;
 
     public CustomConfigPlugin(ModelRoutingService modelRoutingService,
                               LightweightMonitorService monitorService,
                               ModelProviderRegistryService providerRegistryService,
                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory,
-                              cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService) {
+                              cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService,
+                              cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService) {
         super("CustomConfigPlugin");
         this.modelRoutingService = modelRoutingService;
         this.monitorService = monitorService;
         this.providerRegistryService = providerRegistryService;
         this.routingContextFactory = routingContextFactory;
         this.requirementService = requirementService;
+        this.constraintFilteringService = constraintFilteringService;
     }
 
     @Override
@@ -51,7 +54,7 @@ public class CustomConfigPlugin extends BasePlugin {
         String finalModel = requestBuilder.build().model().orElse("");
         String activeAgent = monitorService.activeAgentName(context.invocationId());
 
-        // Shadow Mode: Phase 3 Requirement Analysis for observation (does NOT alter model selection)
+        // Shadow Mode: Phase 3 Requirement & Phase 4 Hard Constraint Filter (observation only, does NOT alter model selection)
         try {
             var routingContext = routingContextFactory.create(
                     requestBuilder.build(),
@@ -60,13 +63,18 @@ public class CustomConfigPlugin extends BasePlugin {
                     explicitModel,
                     explicitModel ? config.getModel() : null
             );
-            var requirement = requirementService.analyze(routingContext);
-            log.debug("Shadow Routing Requirement [invocationId={}]: taskType={}, reasoning={}, structured={}, tool={}, minContextTokens={}, agent={}",
-                    context.invocationId(), requirement.taskType(), requirement.reasoningRequired(),
-                    requirement.structuredOutputRequired(), requirement.toolCallingRequired(),
-                    requirement.minContextWindowTokens(), requirement.agentName());
+            requirementService.tryAnalyze(routingContext).ifPresent(requirement -> {
+                var filterResult = constraintFilteringService.filter(requirement);
+                var acceptedNames = filterResult.accepted().stream().map(m -> m.modelName()).toList();
+                var rejectedSummary = filterResult.rejected().stream()
+                        .map(r -> r.model().modelName() + ":" + r.violations().stream().map(v -> v.reason().name()).toList())
+                        .toList();
+
+                log.debug("Shadow Hard Constraint Filter [invocationId={}]: taskType={}, accepted={}, rejected={}",
+                        context.invocationId(), requirement.taskType(), acceptedNames, rejectedSummary);
+            });
         } catch (Exception e) {
-            log.warn("Shadow routing requirement analysis skipped due to exception: {}", e.getMessage());
+            log.warn("Shadow constraint filtering skipped due to exception: {}", e.getMessage());
         }
 
         if (!explicitModel) {
