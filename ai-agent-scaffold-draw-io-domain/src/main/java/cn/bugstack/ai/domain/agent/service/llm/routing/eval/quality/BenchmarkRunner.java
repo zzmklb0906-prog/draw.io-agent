@@ -112,6 +112,13 @@ public class BenchmarkRunner {
             );
         }
 
+        // -------------------------------------------------------------------------
+        // Phase 8.2: Validate configuration AFTER the enabled gate (so that disabled
+        // benchmarks never fail-fast on invalid properties during ordinary startup),
+        // but BEFORE any model discovery or invocation.
+        // -------------------------------------------------------------------------
+        properties.validate();
+
         // 1. Discover target models
         List<String> modelsToEvaluate;
         if (targetModelNames != null && !targetModelNames.isEmpty()) {
@@ -131,8 +138,10 @@ public class BenchmarkRunner {
                     "No enabled models available in catalog and no targetModelNames provided.");
         }
 
-        int maxCases = properties.getMaxCases() > 0 ? properties.getMaxCases() : 30;
+        // validate() guarantees maxCases >= 1; no silent fallback needed
+        int maxCases = properties.getMaxCases();
         List<BenchmarkCase> casesToRun = dataset.cases().stream().limit(maxCases).toList();
+
 
         long totalModelExecutions = 0;
         long successfulModelExecutions = 0;

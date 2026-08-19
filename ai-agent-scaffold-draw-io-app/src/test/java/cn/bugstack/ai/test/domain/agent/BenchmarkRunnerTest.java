@@ -238,6 +238,88 @@ class BenchmarkRunnerTest {
     }
 
     // =========================================================================
+    // Phase 8.2 — Configuration Validation Fail-Fast
+    // =========================================================================
+
+    @Test
+    void enabledBenchmark_invalidMaxCases_failsFastBeforeInvocation() {
+        CountingFakeInvoker countingInvoker = new CountingFakeInvoker();
+        BenchmarkExecutionProperties invalidProps = new BenchmarkExecutionProperties();
+        invalidProps.setEnabled(true);
+        invalidProps.setMaxCases(0);   // invalid: must be >= 1
+
+        BenchmarkRunner invalidRunner = buildRunner(countingInvoker, invalidProps);
+        BenchmarkDataset dataset = createDataset(3);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> invalidRunner.run(dataset, List.of("qwen3.7-flash")),
+                "maxCases=0 must throw IllegalArgumentException");
+
+        assertEquals(0, countingInvoker.getInvocationCount(),
+                "No model invocations must occur before validation failure");
+    }
+
+    @Test
+    void enabledBenchmark_invalidTimeout_failsFastBeforeInvocation() {
+        CountingFakeInvoker countingInvoker = new CountingFakeInvoker();
+        BenchmarkExecutionProperties invalidProps = new BenchmarkExecutionProperties();
+        invalidProps.setEnabled(true);
+        invalidProps.setRequestTimeoutSeconds(0);  // invalid: must be > 0
+
+        BenchmarkRunner invalidRunner = buildRunner(countingInvoker, invalidProps);
+        BenchmarkDataset dataset = createDataset(3);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> invalidRunner.run(dataset, List.of("qwen3.7-flash")),
+                "requestTimeoutSeconds=0 must throw IllegalArgumentException");
+
+        assertEquals(0, countingInvoker.getInvocationCount(),
+                "No model invocations must occur before validation failure");
+    }
+
+    @Test
+    void enabledBenchmark_negativeQualityTolerance_failsFastBeforeInvocation() {
+        CountingFakeInvoker countingInvoker = new CountingFakeInvoker();
+        BenchmarkExecutionProperties invalidProps = new BenchmarkExecutionProperties();
+        invalidProps.setEnabled(true);
+        invalidProps.setQualityTieTolerance(-1.0);  // invalid: must be >= 0
+
+        BenchmarkRunner invalidRunner = buildRunner(countingInvoker, invalidProps);
+        BenchmarkDataset dataset = createDataset(3);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> invalidRunner.run(dataset, List.of("qwen3.7-flash")),
+                "qualityTieTolerance=-1.0 must throw IllegalArgumentException");
+
+        assertEquals(0, countingInvoker.getInvocationCount(),
+                "No model invocations must occur before validation failure");
+    }
+
+    @Test
+    void disabledBenchmark_withAllInvalidProperties_stillReturnsDisabledWithoutException() {
+        // enabled=false must WIN over invalid properties — disabled gate is absolute first priority.
+        // No IllegalArgumentException should be thrown, and no model invocations made.
+        CountingFakeInvoker countingInvoker = new CountingFakeInvoker();
+        BenchmarkExecutionProperties invalidProps = new BenchmarkExecutionProperties();
+        invalidProps.setEnabled(false);          // gate: disabled
+        invalidProps.setMaxCases(0);             // would fail validate()
+        invalidProps.setRequestTimeoutSeconds(0); // would fail validate()
+        invalidProps.setQualityTieTolerance(-1); // would fail validate()
+
+        BenchmarkRunner disabledRunner = buildRunner(countingInvoker, invalidProps);
+        BenchmarkDataset dataset = createDataset(3);
+
+        BenchmarkReport report = assertDoesNotThrow(
+                () -> disabledRunner.run(dataset, List.of("qwen3.7-flash")),
+                "disabled benchmark must not throw even with invalid properties");
+
+        assertEquals(BenchmarkRunStatus.DISABLED, report.runStatus(),
+                "Report must show DISABLED status");
+        assertEquals(0, countingInvoker.getInvocationCount(),
+                "No model invocations must occur when disabled");
+    }
+
+    // =========================================================================
     // Existing tests (unchanged semantics, adapted for new fields)
     // =========================================================================
 
