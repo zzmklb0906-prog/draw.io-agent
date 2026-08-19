@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContext;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
@@ -46,8 +47,27 @@ public class CompositeModelRouter implements IModelRouterStrategy {
     }
 
     @Override
+    public ModelRoutingService.Decision route(RoutingContext context, String fastModel, String balancedModel, String reasoningModel) {
+        if (context == null) {
+            return ruleRouter.route((RoutingContext) null, fastModel, balancedModel, reasoningModel);
+        }
+        RoutingTextInput input = new RoutingTextInput(context.latestUserText(), context.totalContextChars());
+        return routeFromInput(input, fastModel, balancedModel, reasoningModel);
+    }
+
+    @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
         RoutingTextInput input = extractor.buildRoutingInput(request);
+        return routeFromInput(input, fastModel, balancedModel, reasoningModel);
+    }
+
+    /**
+     * Package-private overload for pipeline reuse.
+     */
+    ModelRoutingService.Decision routeFromInput(RoutingTextInput input,
+                                                String fastModel,
+                                                String balancedModel,
+                                                String reasoningModel) {
         List<Map<String, Object>> pipelineTrail = new ArrayList<>();
 
         // Tier 1: Heuristic semantic analysis (keyword-density based)

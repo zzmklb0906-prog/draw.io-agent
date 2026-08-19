@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContext;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
@@ -32,6 +33,14 @@ public class RuleBasedModelRouter implements IModelRouterStrategy {
     }
 
     @Override
+    public ModelRoutingService.Decision route(RoutingContext context, String fastModel, String balancedModel, String reasoningModel) {
+        if (context == null) {
+            return new ModelRoutingService.Decision(balancedModel, "RULE_BALANCED_DEFAULT", 2);
+        }
+        return routeInternal(context.latestUserText(), context.totalContextChars(), fastModel, balancedModel, reasoningModel);
+    }
+
+    @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
         RoutingTextInput input = extractor.buildRoutingInput(request);
         return routeFromInput(input, fastModel, balancedModel, reasoningModel);
@@ -44,7 +53,15 @@ public class RuleBasedModelRouter implements IModelRouterStrategy {
                                                 String fastModel,
                                                 String balancedModel,
                                                 String reasoningModel) {
-        String latestUserText = input.latestUserText();
+        return routeInternal(input.latestUserText(), input.totalContextChars(), fastModel, balancedModel, reasoningModel);
+    }
+
+    private ModelRoutingService.Decision routeInternal(String latestUserText,
+                                                       int totalContextChars,
+                                                       String fastModel,
+                                                       String balancedModel,
+                                                       String reasoningModel) {
+        if (latestUserText == null) latestUserText = "";
         int latestLen = latestUserText.length();
         String lower = latestUserText.toLowerCase();
 
@@ -64,7 +81,7 @@ public class RuleBasedModelRouter implements IModelRouterStrategy {
 
         Map<String, Object> metrics = new LinkedHashMap<>();
         metrics.put("latestUserTextLength", latestLen);
-        metrics.put("totalContextChars", input.totalContextChars());
+        metrics.put("totalContextChars", totalContextChars);
         metrics.put("matchedKeywords", matched);
 
         if (complex && reasoningModel != null && !reasoningModel.isBlank()) {

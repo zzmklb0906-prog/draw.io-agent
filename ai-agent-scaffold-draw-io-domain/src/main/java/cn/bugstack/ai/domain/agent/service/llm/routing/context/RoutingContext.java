@@ -18,5 +18,32 @@ public record RoutingContext(
         String agentName,
         String workflowStage,
         boolean explicitModel,
-        String explicitModelName
-) {}
+        String explicitModelName,
+        boolean hasToolContext
+) {
+    public RoutingContext(LlmRequest request,
+                          String latestUserText,
+                          int totalContextChars,
+                          long estimatedContextTokens,
+                          String agentName,
+                          String workflowStage,
+                          boolean explicitModel,
+                          String explicitModelName) {
+        this(request, latestUserText, totalContextChars, estimatedContextTokens,
+                agentName, workflowStage, explicitModel, explicitModelName, false);
+    }
+
+    /**
+     * Alias for {@link #latestUserText()} for domain semantics.
+     */
+    public String latestUserMessage() {
+        return latestUserText;
+    }
+
+    /**
+     * Input character length of the latest user message.
+     */
+    public int inputLength() {
+        return latestUserText != null ? latestUserText.length() : 0;
+    }
+}

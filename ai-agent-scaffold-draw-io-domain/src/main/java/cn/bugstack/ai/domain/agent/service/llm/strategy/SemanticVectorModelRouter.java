@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContext;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
@@ -73,8 +74,16 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
     }
 
     // -------------------------------------------------------------------------
-    // IModelRouterStrategy — primary entry point
+    // IModelRouterStrategy — primary entry points
     // -------------------------------------------------------------------------
+
+    @Override
+    public ModelRoutingService.Decision route(RoutingContext context, String fastModel, String balancedModel, String reasoningModel) {
+        if (context == null) {
+            return new ModelRoutingService.Decision(balancedModel, "SEMANTIC_VECTOR_BALANCED", 2);
+        }
+        return routeInternal(context.latestUserText(), context.totalContextChars(), fastModel, balancedModel, reasoningModel);
+    }
 
     @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
@@ -90,7 +99,15 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
                                                 String fastModel,
                                                 String balancedModel,
                                                 String reasoningModel) {
-        String latestUserText = input.latestUserText();
+        return routeInternal(input.latestUserText(), input.totalContextChars(), fastModel, balancedModel, reasoningModel);
+    }
+
+    ModelRoutingService.Decision routeInternal(String latestUserText,
+                                               int totalContextChars,
+                                               String fastModel,
+                                               String balancedModel,
+                                               String reasoningModel) {
+        if (latestUserText == null) latestUserText = "";
         String lower = latestUserText.toLowerCase();
 
         DensityResult reasoningResult = calculateDensity(lower, REASONING_KEYWORDS);
@@ -106,7 +123,7 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
 
         Map<String, Object> metrics = new java.util.LinkedHashMap<>();
         metrics.put("latestUserTextLength", latestUserText.length());
-        metrics.put("totalContextChars", input.totalContextChars());
+        metrics.put("totalContextChars", totalContextChars);
         metrics.put("reasoningScore", Math.round(reasoningScore * 1000.0) / 1000.0);
         metrics.put("lightweightScore", Math.round(lightweightScore * 1000.0) / 1000.0);
         metrics.put("taskLengthFactor", Math.round(taskLengthFactor * 1000.0) / 1000.0);
@@ -118,7 +135,7 @@ public class SemanticVectorModelRouter implements IModelRouterStrategy {
         log.debug("Keyword-density heuristic: latestLen={}, contextLen={}, " +
                         "reasoningScore={}, finalReasoningScore={}, lightweightScore={}, " +
                         "matchedReasoning={}, matchedLightweight={}",
-                latestUserText.length(), input.totalContextChars(),
+                latestUserText.length(), totalContextChars,
                 reasoningScore, finalReasoningScore, lightweightScore,
                 reasoningResult.matchedKeywords, lightweightResult.matchedKeywords);
 

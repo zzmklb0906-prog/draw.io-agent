@@ -22,6 +22,13 @@ public class RoutingContextFactory {
     }
 
     /**
+     * Creates a default {@link RoutingContext} from an {@link LlmRequest}.
+     */
+    public RoutingContext create(LlmRequest request) {
+        return create(request, "unknown", "UNKNOWN", false, null);
+    }
+
+    /**
      * Creates a {@link RoutingContext} with agentName and default stage/explicit flags.
      */
     public RoutingContext create(LlmRequest request, String agentName) {
@@ -40,6 +47,10 @@ public class RoutingContextFactory {
         long estimatedTokens = tokenEstimator.estimate(request);
         String resolvedAgent = StringUtils.isNotBlank(agentName) ? agentName.trim() : "unknown";
         String resolvedStage = StringUtils.isNotBlank(workflowStage) ? workflowStage.trim() : "UNKNOWN";
+        boolean hasToolContext = request != null
+                && request.config().isPresent()
+                && request.config().get().tools().isPresent()
+                && !request.config().get().tools().get().isEmpty();
 
         return new RoutingContext(
                 request,
@@ -49,7 +60,8 @@ public class RoutingContextFactory {
                 resolvedAgent,
                 resolvedStage,
                 explicitModel,
-                explicitModelName
+                explicitModelName,
+                hasToolContext
         );
     }
 }

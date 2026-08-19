@@ -10,6 +10,7 @@ import cn.bugstack.ai.domain.agent.service.llm.routing.requirement.TaskType;
 import cn.bugstack.ai.domain.agent.service.llm.routing.scoring.DynamicModelRankingService;
 import cn.bugstack.ai.domain.agent.service.llm.routing.scoring.ModelScoringProperties;
 import cn.bugstack.ai.domain.agent.service.llm.routing.scoring.WeightedModelScorer;
+import com.google.adk.models.LlmRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -45,7 +46,7 @@ class BenchmarkRunnerTest {
         WeightedModelScorer scorer = new WeightedModelScorer(new ModelScoringProperties());
         ModelRoutingService legacyRouter = Mockito.mock(ModelRoutingService.class);
 
-        when(legacyRouter.route(any())).thenReturn(
+        when(legacyRouter.route(any(LlmRequest.class))).thenReturn(
                 new ModelRoutingService.Decision("qwen3.7-plus", "TEST", 2, "Test", Map.of(), List.of(), List.of())
         );
 
@@ -437,7 +438,7 @@ class BenchmarkRunnerTest {
 
     private BenchmarkRunner buildRunner(BenchmarkModelInvoker invoker, BenchmarkExecutionProperties props) {
         ModelRoutingService legacyRouter = Mockito.mock(ModelRoutingService.class);
-        when(legacyRouter.route(any())).thenReturn(
+        when(legacyRouter.route(any(LlmRequest.class))).thenReturn(
                 new ModelRoutingService.Decision("qwen3.7-plus", "TEST", 2, "Test", Map.of(), List.of(), List.of())
         );
         return new BenchmarkRunner(

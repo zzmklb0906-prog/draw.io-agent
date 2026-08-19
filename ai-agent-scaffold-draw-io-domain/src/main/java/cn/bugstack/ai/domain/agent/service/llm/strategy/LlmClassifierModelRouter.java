@@ -1,6 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.strategy;
 
 import cn.bugstack.ai.domain.agent.service.llm.ModelRoutingService;
+import cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContext;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.LatestUserMessageExtractor;
 import cn.bugstack.ai.domain.agent.service.llm.routing.extract.RoutingTextInput;
 import com.google.adk.models.LlmRequest;
@@ -41,6 +42,14 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
     }
 
     @Override
+    public ModelRoutingService.Decision route(RoutingContext context, String fastModel, String balancedModel, String reasoningModel) {
+        if (context == null) {
+            return fallbackRouter.route((RoutingContext) null, fastModel, balancedModel, reasoningModel);
+        }
+        return routeInternal(context.latestUserText(), context.totalContextChars(), fastModel, balancedModel, reasoningModel);
+    }
+
+    @Override
     public ModelRoutingService.Decision route(LlmRequest request, String fastModel, String balancedModel, String reasoningModel) {
         RoutingTextInput input = extractor.buildRoutingInput(request);
         return routeFromInput(input, fastModel, balancedModel, reasoningModel);
@@ -53,7 +62,15 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
                                                 String fastModel,
                                                 String balancedModel,
                                                 String reasoningModel) {
-        String latestUserText = input.latestUserText();
+        return routeInternal(input.latestUserText(), input.totalContextChars(), fastModel, balancedModel, reasoningModel);
+    }
+
+    private ModelRoutingService.Decision routeInternal(String latestUserText,
+                                                       int totalContextChars,
+                                                       String fastModel,
+                                                       String balancedModel,
+                                                       String reasoningModel) {
+        if (latestUserText == null) latestUserText = "";
 
         try {
             Optional<ClassifierResult> evalResult = evaluateWithSlm(latestUserText);
@@ -64,7 +81,7 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
                 String reason = "HEURISTIC_CLASSIFIER: " + result.reason;
                 Map<String, Object> metrics = Map.of(
                         "latestUserTextLength", latestUserText.length(),
-                        "totalContextChars", input.totalContextChars(),
+                        "totalContextChars", totalContextChars,
                         "heuristicComplexity", complexity,
                         "heuristicReason", result.reason
                 );
@@ -84,8 +101,8 @@ public class LlmClassifierModelRouter implements IModelRouterStrategy {
             log.warn("Heuristic classifier evaluation failed, falling back: {}", e.getMessage());
         }
 
-        // Fallback: delegate to SemanticVectorModelRouter with the same RoutingTextInput
-        return fallbackRouter.routeFromInput(input, fastModel, balancedModel, reasoningModel);
+        // Fallback: delegate to SemanticVectorModelRouter with the same parameters
+        return fallbackRouter.routeInternal(latestUserText, totalContextChars, fastModel, balancedModel, reasoningModel);
     }
 
     @Override
