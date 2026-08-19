@@ -30,6 +30,7 @@ public class CustomConfigPlugin extends BasePlugin {
     private final cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.scoring.DynamicModelRankingService dynamicRankingService;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.eval.RoutingEvaluationService evaluationService;
 
     public CustomConfigPlugin(ModelRoutingService modelRoutingService,
                               LightweightMonitorService monitorService,
@@ -37,7 +38,8 @@ public class CustomConfigPlugin extends BasePlugin {
                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory routingContextFactory,
                               cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService,
                               cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelConstraintFilteringService constraintFilteringService,
-                              cn.bugstack.ai.domain.agent.service.llm.routing.scoring.DynamicModelRankingService dynamicRankingService) {
+                              cn.bugstack.ai.domain.agent.service.llm.routing.scoring.DynamicModelRankingService dynamicRankingService,
+                              cn.bugstack.ai.domain.agent.service.llm.routing.eval.RoutingEvaluationService evaluationService) {
         super("CustomConfigPlugin");
         this.modelRoutingService = modelRoutingService;
         this.monitorService = monitorService;
@@ -46,6 +48,7 @@ public class CustomConfigPlugin extends BasePlugin {
         this.requirementService = requirementService;
         this.constraintFilteringService = constraintFilteringService;
         this.dynamicRankingService = dynamicRankingService;
+        this.evaluationService = evaluationService;
     }
 
     @Override
@@ -54,14 +57,19 @@ public class CustomConfigPlugin extends BasePlugin {
         CustomApiConfigManager.CustomApiConfig config = CustomApiConfigManager.getConfig(sessionId);
 
         boolean explicitModel = config != null && config.isCustomModelSelected() && StringUtils.isNotBlank(config.getModel());
-        String finalModel = requestBuilder.build().model().orElse("");
+        String defaultModel = requestBuilder.build().model().orElse("");
         String activeAgent = monitorService.activeAgentName(context.invocationId());
         String shadowRecommendedModel = null;
         Double shadowTopScore = null;
 
+        cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContext routingContext = null;
+        cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirement routingRequirement = null;
+        cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ModelFilterResult modelFilterResult = null;
+        cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RankingResult modelRankingResult = null;
+
         // Shadow Mode: Phase 3 Requirement, Phase 4 Filter & Phase 5 Ranking (observation only, does NOT alter model selection)
         try {
-            var routingContext = routingContextFactory.create(
+            routingContext = routingContextFactory.create(
                     requestBuilder.build(),
                     activeAgent,
                     "UNKNOWN",
@@ -70,38 +78,43 @@ public class CustomConfigPlugin extends BasePlugin {
             );
             var reqOpt = requirementService.tryAnalyze(routingContext);
             if (reqOpt.isPresent()) {
-                var requirement = reqOpt.get();
-                var filterResult = constraintFilteringService.filter(requirement);
-                var rankingResult = dynamicRankingService.rank(requirement, filterResult);
+                routingRequirement = reqOpt.get();
+                modelFilterResult = constraintFilteringService.filter(routingRequirement);
+                modelRankingResult = dynamicRankingService.rank(routingRequirement, modelFilterResult);
 
-                if (rankingResult.topCandidate().isPresent()) {
-                    var top = rankingResult.topCandidate().get();
+                if (modelRankingResult.topCandidate().isPresent()) {
+                    var top = modelRankingResult.topCandidate().get();
                     shadowRecommendedModel = top.model().modelName();
                     shadowTopScore = top.totalScore();
                 }
 
-                var rankingSummary = rankingResult.rankedCandidates().stream()
+                var rankingSummary = modelRankingResult.rankedCandidates().stream()
                         .map(cs -> String.format("%s:%.2f", cs.model().modelName(), cs.totalScore()))
                         .toList();
 
                 log.debug("Shadow Dynamic Ranking [invocationId={}]: taskType={}, recommended={}, topScore={}, ranking={}",
-                        context.invocationId(), requirement.taskType(), shadowRecommendedModel, shadowTopScore, rankingSummary);
+                        context.invocationId(), routingRequirement.taskType(), shadowRecommendedModel, shadowTopScore, rankingSummary);
             }
         } catch (Exception e) {
             log.warn("Shadow dynamic ranking skipped due to exception: {}", e.getMessage());
         }
 
+        // Actual Production Model Selection (Legacy Router or Explicit User Selection)
+        String actualModel;
+        cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource selectionSource;
+
         if (!explicitModel) {
             ModelRoutingService.Decision decision = modelRoutingService.route(requestBuilder.build());
-            String selected = decision.model() != null ? decision.model() : finalModel;
+            actualModel = decision.model() != null ? decision.model() : defaultModel;
+            selectionSource = cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource.LEGACY_ROUTER;
+
             if (decision.model() != null) {
                 requestBuilder.model(decision.model());
-                finalModel = decision.model();
             }
             monitorService.modelRouted(
                     context.invocationId(),
                     monitorService.activeAgentName(context.invocationId()),
-                    selected,
+                    actualModel,
                     decision.reason(),
                     decision.complexity(),
                     false,
@@ -110,35 +123,33 @@ public class CustomConfigPlugin extends BasePlugin {
                     decision.matchedKeywords(),
                     decision.pipelineTrail()
             );
-            log.info("Model Router invocationId={} model={} reason={} complexity={}", context.invocationId(), selected, decision.reason(), decision.complexity());
-        } else if (config != null && StringUtils.isNotBlank(config.getModel())) {
-            requestBuilder.model(config.getModel());
-            finalModel = config.getModel();
+            log.info("Model Router invocationId={} model={} reason={} complexity={}", context.invocationId(), actualModel, decision.reason(), decision.complexity());
+        } else {
+            actualModel = config.getModel();
+            selectionSource = cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource.USER_EXPLICIT;
+
+            requestBuilder.model(actualModel);
             monitorService.modelRouted(
                     context.invocationId(),
                     monitorService.activeAgentName(context.invocationId()),
-                    config.getModel(),
+                    actualModel,
                     "USER_EXPLICIT",
                     0,
                     true,
-                    "用户在工作台显式指定覆盖模型：" + config.getModel(),
-                    Map.of("explicitModel", config.getModel()),
+                    "用户在工作台显式指定覆盖模型：" + actualModel,
+                    Map.of("explicitModel", actualModel),
                     List.of(),
                     List.of(Map.of("tier", "Explicit User Selection", "status", "OVERRIDDEN", "detail", "用户前端直接选定模型"))
             );
         }
 
-        // Record unified Shadow Routing Comparison
-        cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource selectionSource =
-                explicitModel ? cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource.USER_EXPLICIT
-                        : cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource.LEGACY_ROUTER;
-
-        Boolean matched = (shadowRecommendedModel != null && finalModel != null)
-                ? shadowRecommendedModel.equalsIgnoreCase(finalModel)
+        // Record unified Shadow Routing Comparison & Phase 6 Structured Evaluation Telemetry
+        Boolean matched = (shadowRecommendedModel != null && actualModel != null)
+                ? shadowRecommendedModel.equalsIgnoreCase(actualModel)
                 : null;
 
         var comparison = new cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison(
-                finalModel,
+                actualModel,
                 shadowRecommendedModel,
                 matched,
                 shadowTopScore,
@@ -148,8 +159,22 @@ public class CustomConfigPlugin extends BasePlugin {
         log.debug("Shadow Routing Comparison [invocationId={}]: actualModel={}, recommendedModel={}, matched={}, recommendedScore={}, actualSource={}",
                 context.invocationId(), comparison.actualModel(), comparison.recommendedModel(), comparison.matched(), comparison.recommendedScore(), comparison.actualSource());
 
-        // 根据确定后的 finalModel 自动匹配多厂商 Provider 三元组 (BaseUrl, ApiKey, CompletionsPath)
-        ModelProviderProperties.ProviderConfig providerConfig = providerRegistryService.findProviderConfig(finalModel);
+        try {
+            var evalRecord = evaluationService.buildRecord(
+                    context.invocationId(),
+                    routingContext,
+                    routingRequirement,
+                    modelFilterResult,
+                    modelRankingResult,
+                    comparison
+            );
+            evaluationService.tryRecord(evalRecord);
+        } catch (Exception e) {
+            log.warn("Shadow evaluation recording skipped due to exception: {}", e.getMessage());
+        }
+
+        // 根据确定后的 actualModel 自动匹配多厂商 Provider 三元组 (BaseUrl, ApiKey, CompletionsPath)
+        ModelProviderProperties.ProviderConfig providerConfig = providerRegistryService.findProviderConfig(actualModel);
 
         GenerateContentConfig.Builder configBuilder = requestBuilder.config().isPresent() ?
                 requestBuilder.config().get().toBuilder() : GenerateContentConfig.builder();
