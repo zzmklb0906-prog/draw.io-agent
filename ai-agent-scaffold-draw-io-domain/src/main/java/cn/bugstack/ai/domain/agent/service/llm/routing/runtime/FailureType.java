@@ -9,5 +9,6 @@ public enum FailureType {
     RATE_LIMIT,
     PROVIDER_ERROR,
     INVALID_RESPONSE,
+    USER_INPUT_ERROR,
     UNKNOWN
 }
