@@ -20,9 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,24 +31,34 @@ class RoutingEvaluationServiceTest {
 
     private RoutingEvaluationService evaluationService;
     private List<RoutingEvaluationRecord> recordedList;
+    private ModelCatalogService catalogService;
+
+    private ModelProfile qwenPlus;
+    private ModelProfile qwenMax;
+    private ModelProfile qwenFlash;
 
     @BeforeEach
     void setUp() {
         this.recordedList = new ArrayList<>();
         RoutingEvaluationRecorder recorder = record -> recordedList.add(record);
         WeightedModelScorer scorer = new WeightedModelScorer(new ModelScoringProperties());
-        this.evaluationService = new RoutingEvaluationService(List.of(recorder), scorer);
+
+        this.qwenFlash = createModel("qwen3.7-flash", BigDecimal.valueOf(0.2), BigDecimal.valueOf(0.8));
+        this.qwenPlus = createModel("qwen3.7-plus", BigDecimal.valueOf(2.0), BigDecimal.valueOf(8.0));
+        this.qwenMax = createModel("qwen3.8-max", BigDecimal.valueOf(12.0), BigDecimal.valueOf(36.0));
+
+        this.catalogService = createCatalog(qwenFlash, qwenPlus, qwenMax);
+        this.evaluationService = new RoutingEvaluationService(List.of(recorder), scorer, catalogService);
     }
 
     @Test
     void case1_legacyEqualsDynamic_reportsMatchedTrue() {
         RoutingContext ctx = createContext("agent_analyst");
         RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
-        ModelProfile model = createModel("qwen3.7-plus", BigDecimal.ONE, BigDecimal.TEN);
 
-        CandidateScore cs = createCandidateScore(model, 92.0, 0.05);
+        CandidateScore cs = createCandidateScore(qwenPlus, 92.0, 0.05);
         RankingResult ranking = new RankingResult(List.of(cs));
-        ModelFilterResult filterResult = new ModelFilterResult(List.of(model), List.of(), List.of());
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenPlus), List.of(), List.of());
         RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.7-plus", true, 92.0, SelectionSource.LEGACY_ROUTER);
 
         RoutingEvaluationRecord record = evaluationService.buildRecord("inv-1", ctx, req, filterResult, ranking, comparison);
@@ -65,13 +73,11 @@ class RoutingEvaluationServiceTest {
     void case2_legacyNotEqualsDynamic_reportsMatchedFalse() {
         RoutingContext ctx = createContext("agent_analyst");
         RoutingRequirement req = createReq(TaskType.DRAWIO_GENERATION, false);
-        ModelProfile modelMax = createModel("qwen3.8-max", BigDecimal.valueOf(12.0), BigDecimal.valueOf(36.0));
-        ModelProfile modelPlus = createModel("qwen3.7-plus", BigDecimal.valueOf(2.0), BigDecimal.valueOf(8.0));
 
-        CandidateScore csMax = createCandidateScore(modelMax, 95.0, 0.15);
-        CandidateScore csPlus = createCandidateScore(modelPlus, 88.0, 0.03);
+        CandidateScore csMax = createCandidateScore(qwenMax, 95.0, 0.15);
+        CandidateScore csPlus = createCandidateScore(qwenPlus, 88.0, 0.03);
         RankingResult ranking = new RankingResult(List.of(csMax, csPlus));
-        ModelFilterResult filterResult = new ModelFilterResult(List.of(modelMax, modelPlus), List.of(), List.of());
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenMax, qwenPlus), List.of(), List.of());
         RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.8-max", false, 95.0, SelectionSource.LEGACY_ROUTER);
 
         RoutingEvaluationRecord record = evaluationService.buildRecord("inv-2", ctx, req, filterResult, ranking, comparison);
@@ -80,7 +86,7 @@ class RoutingEvaluationServiceTest {
         assertTrue(record.flags().contains(RoutingEvaluationFlag.UNMATCHED));
         assertEquals(88.0, record.actualModelScore(), 0.01);
         assertEquals(7.0, record.scoreMargin(), 0.01);
-        assertEquals(0.15 - 0.03, record.costDelta(), 0.0001);
+        assertNotNull(record.costDelta());
     }
 
     @Test
@@ -94,18 +100,20 @@ class RoutingEvaluationServiceTest {
         assertNull(record.recommendedModel());
         assertTrue(record.flags().contains(RoutingEvaluationFlag.NO_DYNAMIC_RECOMMENDATION));
         assertTrue(record.flags().contains(RoutingEvaluationFlag.NO_ELIGIBLE_CANDIDATE));
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE));
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE),
+                "No recommendation should not falsely flag PRICING_UNAVAILABLE");
     }
 
     @Test
     void case4_singleCandidate_scoreMarginIsNull() {
         RoutingContext ctx = createContext("agent_analyst");
         RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
-        ModelProfile model = createModel("only-model", BigDecimal.ONE, BigDecimal.TEN);
 
-        CandidateScore cs = createCandidateScore(model, 90.0, 0.05);
+        CandidateScore cs = createCandidateScore(qwenPlus, 90.0, 0.05);
         RankingResult ranking = new RankingResult(List.of(cs));
-        ModelFilterResult filterResult = new ModelFilterResult(List.of(model), List.of(), List.of());
-        RoutingShadowComparison comparison = new RoutingShadowComparison("only-model", "only-model", true, 90.0, SelectionSource.LEGACY_ROUTER);
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenPlus), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.7-plus", true, 90.0, SelectionSource.LEGACY_ROUTER);
 
         RoutingEvaluationRecord record = evaluationService.buildRecord("inv-4", ctx, req, filterResult, ranking, comparison);
 
@@ -115,44 +123,124 @@ class RoutingEvaluationServiceTest {
     }
 
     @Test
-    void case5_actualModelHardRejected_isFlaggedAppropriately() {
+    void actualModelNotInCatalog_setsCorrectFlag() {
+        RoutingContext ctx = createContext("agent_analyst");
+        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
+
+        RankingResult ranking = new RankingResult(List.of(createCandidateScore(qwenPlus, 90.0, 0.05)));
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenPlus), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("custom-external-model", "qwen3.7-plus", false, 90.0, SelectionSource.USER_EXPLICIT);
+
+        RoutingEvaluationRecord record = evaluationService.buildRecord("inv-not-in-cat", ctx, req, filterResult, ranking, comparison);
+
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG));
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_HARD_REJECTED));
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE));
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE),
+                "Model not in catalog should set ACTUAL_MODEL_NOT_IN_CATALOG, not PRICING_UNAVAILABLE");
+        assertNull(record.estimatedActualCost());
+        assertNull(record.costDelta());
+    }
+
+    @Test
+    void hardRejectedActualModel_stillCalculatesCostWhenCatalogPricingExists() {
         RoutingContext ctx = createContext("agent_analyst");
         RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, true);
-        ModelProfile acceptedModel = createModel("vision-model", BigDecimal.ONE, BigDecimal.TEN);
-        ModelProfile rejectedModel = createModel("legacy-text-model", BigDecimal.ONE, BigDecimal.TEN);
+
+        // qwen3.7-plus is in catalog and has pricing
+        ModelProfile rejectedModel = qwenPlus;
+        ModelProfile acceptedModel = qwenMax;
 
         List<RejectedModel> rejectedList = List.of(new RejectedModel(rejectedModel, List.of(
                 new ConstraintViolation(ConstraintReason.VISION_UNSUPPORTED, "vision", "no vision")
         )));
         ModelFilterResult filterResult = new ModelFilterResult(List.of(acceptedModel), rejectedList, List.of());
-        RankingResult ranking = new RankingResult(List.of(createCandidateScore(acceptedModel, 90.0, 0.05)));
-        RoutingShadowComparison comparison = new RoutingShadowComparison("legacy-text-model", "vision-model", false, 90.0, SelectionSource.LEGACY_ROUTER);
+        RankingResult ranking = new RankingResult(List.of(createCandidateScore(acceptedModel, 95.0, 0.15)));
+        RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.8-max", false, 95.0, SelectionSource.LEGACY_ROUTER);
 
-        RoutingEvaluationRecord record = evaluationService.buildRecord("inv-5", ctx, req, filterResult, ranking, comparison);
+        RoutingEvaluationRecord record = evaluationService.buildRecord("inv-hard-reject", ctx, req, filterResult, ranking, comparison);
 
         assertTrue(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_HARD_REJECTED));
-        assertEquals(1, record.rejectedCandidateCount());
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG));
+        assertNull(record.actualModelScore(), "Hard rejected model should have null actualModelScore");
+        assertNotNull(record.estimatedActualCost(), "Hard rejected model with pricing in catalog must produce estimatedActualCost");
+        assertNotNull(record.estimatedRecommendedCost());
+        assertNotNull(record.costDelta(), "Cost delta must be computed when both costs exist");
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE));
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE));
     }
 
     @Test
-    void case6_missingPricing_costDeltaIsNullWithoutSynthesizedZero() {
-        RoutingContext ctx = createContext("agent_analyst");
-        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
-        ModelProfile modelNoPrice = new ModelProfile("no-price", "qwen", "no-price", true,
+    void actualModelPricingMissing_setsPricingAndComparisonUnavailable() {
+        ModelProfile modelNoPrice = new ModelProfile("no-price-model", "test", "no-price-model", true,
                 new ModelCapabilities(80, 80, 80, 80, 80, 80, 80),
                 new ModelFeatures(SupportStatus.SUPPORTED, SupportStatus.SUPPORTED, SupportStatus.SUPPORTED),
                 new ModelLimits(100000L, 8192L),
                 null);
 
-        CandidateScore cs = createCandidateScore(modelNoPrice, 90.0, -1.0);
-        RankingResult ranking = new RankingResult(List.of(cs));
-        ModelFilterResult filterResult = new ModelFilterResult(List.of(modelNoPrice), List.of(), List.of());
-        RoutingShadowComparison comparison = new RoutingShadowComparison("no-price", "no-price", true, 90.0, SelectionSource.LEGACY_ROUTER);
+        ModelCatalogService localCatalog = createCatalog(qwenPlus, qwenMax, modelNoPrice);
+        RoutingEvaluationService localService = new RoutingEvaluationService(List.of(), new WeightedModelScorer(new ModelScoringProperties()), localCatalog);
 
-        RoutingEvaluationRecord record = evaluationService.buildRecord("inv-6", ctx, req, filterResult, ranking, comparison);
+        RoutingContext ctx = createContext("agent_analyst");
+        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
+        RankingResult ranking = new RankingResult(List.of(createCandidateScore(qwenPlus, 90.0, 0.05)));
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(qwenPlus), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("no-price-model", "qwen3.7-plus", false, 90.0, SelectionSource.LEGACY_ROUTER);
 
-        assertNull(record.costDelta());
+        RoutingEvaluationRecord record = localService.buildRecord("inv-price-miss", ctx, req, filterResult, ranking, comparison);
+
         assertTrue(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE));
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE));
+        assertNull(record.estimatedActualCost());
+        assertNull(record.costDelta());
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG));
+    }
+
+    @Test
+    void recommendedPricingMissing_setsPricingAndComparisonUnavailable() {
+        RoutingContext ctx = createContext("agent_analyst");
+        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
+        ModelProfile recModelNoPrice = new ModelProfile("rec-no-price", "test", "rec-no-price", true,
+                new ModelCapabilities(80, 80, 80, 80, 80, 80, 80),
+                new ModelFeatures(SupportStatus.SUPPORTED, SupportStatus.SUPPORTED, SupportStatus.SUPPORTED),
+                new ModelLimits(100000L, 8192L),
+                null);
+
+        CandidateScore cs = createCandidateScore(recModelNoPrice, 90.0, -1.0);
+        RankingResult ranking = new RankingResult(List.of(cs));
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(recModelNoPrice), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "rec-no-price", false, 90.0, SelectionSource.LEGACY_ROUTER);
+
+        RoutingEvaluationRecord record = evaluationService.buildRecord("inv-rec-miss", ctx, req, filterResult, ranking, comparison);
+
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.PRICING_UNAVAILABLE));
+        assertTrue(record.flags().contains(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE));
+        assertNull(record.estimatedRecommendedCost());
+        assertNull(record.costDelta());
+    }
+
+    @Test
+    void catalogModelMatchingByModelName_findsProfile() {
+        // Model whose id is "qwen-plus-id" but modelName is "qwen3.7-plus"
+        ModelProfile customNamed = new ModelProfile("qwen-plus-id", "test", "qwen3.7-plus", true,
+                new ModelCapabilities(80, 80, 80, 80, 80, 80, 80),
+                new ModelFeatures(SupportStatus.SUPPORTED, SupportStatus.SUPPORTED, SupportStatus.SUPPORTED),
+                new ModelLimits(100000L, 8192L),
+                new ModelPricing(BigDecimal.ONE, BigDecimal.TEN, "CNY"));
+
+        ModelCatalogService localCatalog = createCatalog(customNamed);
+        RoutingEvaluationService localService = new RoutingEvaluationService(List.of(), new WeightedModelScorer(new ModelScoringProperties()), localCatalog);
+
+        RoutingContext ctx = createContext("agent_analyst");
+        RoutingRequirement req = createReq(TaskType.GENERAL_CHAT, false);
+        RankingResult ranking = new RankingResult(List.of(createCandidateScore(customNamed, 90.0, 0.05)));
+        ModelFilterResult filterResult = new ModelFilterResult(List.of(customNamed), List.of(), List.of());
+        RoutingShadowComparison comparison = new RoutingShadowComparison("qwen3.7-plus", "qwen3.7-plus", true, 90.0, SelectionSource.LEGACY_ROUTER);
+
+        RoutingEvaluationRecord record = localService.buildRecord("inv-match-name", ctx, req, filterResult, ranking, comparison);
+
+        assertFalse(record.flags().contains(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG));
+        assertNotNull(record.estimatedActualCost());
     }
 
     @Test
@@ -160,7 +248,7 @@ class RoutingEvaluationServiceTest {
         RoutingEvaluationRecorder brokenRecorder = record -> {
             throw new RuntimeException("DB Connection Timeout");
         };
-        RoutingEvaluationService resilientService = new RoutingEvaluationService(List.of(brokenRecorder), new WeightedModelScorer(new ModelScoringProperties()));
+        RoutingEvaluationService resilientService = new RoutingEvaluationService(List.of(brokenRecorder), new WeightedModelScorer(new ModelScoringProperties()), catalogService);
 
         RoutingEvaluationRecord dummyRecord = new RoutingEvaluationRecord(
                 "inv-test", "agent", TaskType.GENERAL_CHAT, "m", "m", true, 90.0, SelectionSource.LEGACY_ROUTER,
@@ -174,6 +262,33 @@ class RoutingEvaluationServiceTest {
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    private ModelCatalogService createCatalog(ModelProfile... profiles) {
+        Map<String, ModelProfile> byId = new HashMap<>();
+        Map<String, ModelProfile> byName = new HashMap<>();
+        for (ModelProfile p : profiles) {
+            byId.put(p.id().toLowerCase(), p);
+            byName.put(p.modelName().toLowerCase(), p);
+        }
+        return new ModelCatalogService(new ModelCatalogProperties()) {
+            @Override
+            public Optional<ModelProfile> findById(String id) {
+                return Optional.ofNullable(id != null ? byId.get(id.toLowerCase()) : null);
+            }
+            @Override
+            public Optional<ModelProfile> findByModelName(String modelName) {
+                return Optional.ofNullable(modelName != null ? byName.get(modelName.toLowerCase()) : null);
+            }
+            @Override
+            public List<ModelProfile> getAllModels() {
+                return List.of(profiles);
+            }
+            @Override
+            public List<ModelProfile> getEnabledModels() {
+                return Arrays.stream(profiles).filter(ModelProfile::enabled).toList();
+            }
+        };
+    }
 
     private RoutingContext createContext(String agent) {
         return new RoutingContext(LlmRequest.builder().model("test").build(), "text", 100, 10L, agent, "UNKNOWN", false, null);

@@ -1,5 +1,6 @@
 package cn.bugstack.ai.domain.agent.service.llm.routing.eval;
 
+import cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService;
 import cn.bugstack.ai.domain.agent.service.llm.catalog.ModelProfile;
 import cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ConstraintReason;
 import cn.bugstack.ai.domain.agent.service.llm.routing.constraint.ConstraintViolation;
@@ -13,6 +14,7 @@ import cn.bugstack.ai.domain.agent.service.llm.routing.scoring.ModelScorer;
 import cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RankingResult;
 import cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -27,11 +29,14 @@ public class RoutingEvaluationService {
 
     private final List<RoutingEvaluationRecorder> recorders;
     private final ModelScorer modelScorer;
+    private final ModelCatalogService modelCatalogService;
 
     public RoutingEvaluationService(List<RoutingEvaluationRecorder> recorders,
-                                   ModelScorer modelScorer) {
+                                   ModelScorer modelScorer,
+                                   ModelCatalogService modelCatalogService) {
         this.recorders = recorders != null ? recorders : List.of();
         this.modelScorer = modelScorer;
+        this.modelCatalogService = modelCatalogService;
     }
 
     /**
@@ -73,12 +78,17 @@ public class RoutingEvaluationService {
         Double actualModelScore = null;
         Double estRecommendedCost = null;
         Double estActualCost = null;
+        boolean recommendedPricingMissing = false;
 
         if (rankingResult != null && !rankingResult.isEmpty()) {
             List<CandidateScore> ranked = rankingResult.rankedCandidates();
-            top1Score = ranked.get(0).totalScore();
-            if (ranked.get(0).estimatedCost() >= 0.0) {
-                estRecommendedCost = ranked.get(0).estimatedCost();
+            CandidateScore topCs = ranked.get(0);
+            top1Score = topCs.totalScore();
+
+            if (topCs.estimatedCost() >= 0.0) {
+                estRecommendedCost = topCs.estimatedCost();
+            } else {
+                recommendedPricingMissing = true;
             }
 
             if (ranked.size() >= 2) {
@@ -96,21 +106,41 @@ public class RoutingEvaluationService {
                 ));
             }
 
-            // Find actual model in ranked list
+            // Find actual model score only if actual model is present in ranked candidates
             if (actualModel != null) {
                 for (CandidateScore cs : ranked) {
                     if (actualModel.equalsIgnoreCase(cs.model().id()) || actualModel.equalsIgnoreCase(cs.model().modelName())) {
                         actualModelScore = cs.totalScore();
-                        if (cs.estimatedCost() >= 0.0) {
-                            estActualCost = cs.estimatedCost();
-                        }
                         break;
                     }
                 }
             }
         }
 
-        // If actual model was not in ranking but we have filter results, check if it was rejected
+        // Independent actual model catalog lookup & cost estimation
+        Optional<ModelProfile> actualProfileOpt = findCatalogProfile(actualModel);
+        boolean actualPricingMissing = false;
+        boolean actualNotInCatalog = false;
+
+        if (StringUtils.isNotBlank(actualModel)) {
+            if (actualProfileOpt.isPresent()) {
+                ModelProfile actualProfile = actualProfileOpt.get();
+                if (hasPricing(actualProfile)) {
+                    double cost = modelScorer.estimateCost(requirement, actualProfile);
+                    if (cost >= 0.0) {
+                        estActualCost = cost;
+                    } else {
+                        actualPricingMissing = true;
+                    }
+                } else {
+                    actualPricingMissing = true;
+                }
+            } else {
+                actualNotInCatalog = true;
+            }
+        }
+
+        // Build Diagnostic Flags
         Set<RoutingEvaluationFlag> flags = new HashSet<>();
         if (Boolean.TRUE.equals(matched)) {
             flags.add(RoutingEvaluationFlag.MATCHED);
@@ -134,6 +164,10 @@ public class RoutingEvaluationService {
             flags.add(RoutingEvaluationFlag.UNKNOWN_FEATURE_PRESENT);
         }
 
+        if (actualNotInCatalog) {
+            flags.add(RoutingEvaluationFlag.ACTUAL_MODEL_NOT_IN_CATALOG);
+        }
+
         // Check if actualModel was rejected by Hard Constraint Filter
         if (actualModel != null && filterResult != null) {
             boolean isHardRejected = filterResult.rejected().stream().anyMatch(rm ->
@@ -143,11 +177,17 @@ public class RoutingEvaluationService {
             }
         }
 
+        // PRICING_UNAVAILABLE: True only when pricing metadata is missing on an evaluated model
+        if (recommendedPricingMissing || actualPricingMissing) {
+            flags.add(RoutingEvaluationFlag.PRICING_UNAVAILABLE);
+        }
+
+        // Cost Delta & COST_COMPARISON_UNAVAILABLE
         Double costDelta = null;
         if (estRecommendedCost != null && estActualCost != null) {
             costDelta = estRecommendedCost - estActualCost;
-        } else if (estRecommendedCost == null || estActualCost == null) {
-            flags.add(RoutingEvaluationFlag.PRICING_UNAVAILABLE);
+        } else {
+            flags.add(RoutingEvaluationFlag.COST_COMPARISON_UNAVAILABLE);
         }
 
         RequirementSnapshot reqSnapshot = null;
@@ -203,5 +243,25 @@ public class RoutingEvaluationService {
                         recorder.getClass().getSimpleName(), e.getMessage());
             }
         }
+    }
+
+    private Optional<ModelProfile> findCatalogProfile(String modelNameOrId) {
+        if (modelCatalogService == null || StringUtils.isBlank(modelNameOrId)) {
+            return Optional.empty();
+        }
+        try {
+            return modelCatalogService.findByModelName(modelNameOrId)
+                    .or(() -> modelCatalogService.findById(modelNameOrId));
+        } catch (Exception e) {
+            log.warn("Failed to lookup model [{}] in catalog: {}", modelNameOrId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private boolean hasPricing(ModelProfile profile) {
+        return profile != null
+                && profile.pricing() != null
+                && profile.pricing().inputPerMillionTokens() != null
+                && profile.pricing().outputPerMillionTokens() != null;
     }
 }
