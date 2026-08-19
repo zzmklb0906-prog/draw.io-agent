@@ -85,7 +85,7 @@ public class DefaultModelConstraintFilter implements ModelConstraintFilter {
                         warnings.add(new ModelConstraintWarning(
                                 model.id(),
                                 ConstraintReason.VISION_SUPPORT_UNKNOWN,
-                                "Model vision support is UNKNOWN; conditionally accepted with warning"
+                                "Vision support is UNKNOWN; no hard rejection applied for vision"
                         ));
                     }
                 }
