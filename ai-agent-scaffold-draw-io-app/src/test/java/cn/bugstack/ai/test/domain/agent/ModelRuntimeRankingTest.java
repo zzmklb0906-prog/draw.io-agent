@@ -250,6 +250,106 @@ public class ModelRuntimeRankingTest {
     }
 
     // =========================================================================
+    // Case 11: Fix 1 - Latency Requirement Sensitivity
+    // =========================================================================
+    @Test
+    @DisplayName("Case 11: Fix 1 验证 - 验证 HIGH 延迟敏感度下的惩罚差距显著大于 LOW 敏感度")
+    void case11_latencyRequirementSensitivity() {
+        ModelRuntimeProfile fastRuntime = new ModelRuntimeProfile("model-fast", 0.99, 0.0, 500.0, null, RuntimeHealth.HEALTHY, 100L);
+        ModelRuntimeProfile slowRuntime = new ModelRuntimeProfile("model-slow", 0.99, 0.0, 5000.0, null, RuntimeHealth.HEALTHY, 100L);
+
+        // Requirement A: HIGH sensitivity
+        RoutingRequirement reqHigh = new RoutingRequirement(
+                TaskType.SIMPLE_EDIT, 30, 50, 0, 0, 0, false, 4096L, 1024L, "agent",
+                RequirementEvidence.empty(), LatencySensitivity.HIGH
+        );
+        List<RankedModel> rankedHigh = rankingEngine.rank(
+                reqHigh, List.of(modelFast, modelSlow),
+                Map.of("model-fast", fastRuntime, "model-slow", slowRuntime)
+        );
+        double diffHigh = rankedHigh.get(0).breakdown().latencyFit() - rankedHigh.get(1).breakdown().latencyFit();
+
+        // Requirement B: LOW sensitivity
+        RoutingRequirement reqLow = new RoutingRequirement(
+                TaskType.DIAGNOSE, 80, 80, 50, 0, 0, false, 4096L, 1024L, "agent",
+                RequirementEvidence.empty(), LatencySensitivity.LOW
+        );
+        List<RankedModel> rankedLow = rankingEngine.rank(
+                reqLow, List.of(modelFast, modelSlow),
+                Map.of("model-fast", fastRuntime, "model-slow", slowRuntime)
+        );
+        double diffLow = rankedLow.get(0).breakdown().latencyFit() - rankedLow.get(1).breakdown().latencyFit();
+
+        assertTrue(diffHigh > diffLow, "HIGH sensitivity latency difference must be strictly greater than LOW sensitivity");
+    }
+
+    // =========================================================================
+    // Case 12: Fix 2 - Cost Input Token Semantics (No Margin Inflation)
+    // =========================================================================
+    @Test
+    @DisplayName("Case 12: Fix 2 验证 - 验证成本估算使用 estimatedContextTokens 而非包含安全余量的 minContextWindowTokens")
+    void case12_costInputTokenSemanticsNoMarginInflation() {
+        RequirementEvidence evidence = new RequirementEvidence(
+                List.of("test"), List.of("test"), List.of(), 4000L, 2000L
+        );
+        // minContextWindowTokens is 10000 (with buffer), but actual estimated input is 4000
+        RoutingRequirement req = new RoutingRequirement(
+                TaskType.GENERAL_CHAT, 40, 50, 10, 10, 0, false, 10000L, 2000L, "agent", evidence, LatencySensitivity.NORMAL
+        );
+
+        assertEquals(4000L, req.estimatedInputTokens());
+        assertEquals(10000L, req.minContextWindowTokens());
+
+        List<RankedModel> ranked = rankingEngine.rank(req, List.of(modelLight));
+        assertFalse(ranked.isEmpty());
+        RankedModel r = ranked.get(0);
+
+        // Price: in=0.5 / 1M, out=1.0 / 1M
+        // Expected cost = (4000 / 1M * 0.5) + (2000 / 1M * 1.0) = 0.002 + 0.002 = 0.004
+        // If it mistakenly used minContextWindowTokens (10000), it would be (10000 / 1M * 0.5) + 0.002 = 0.007
+        assertEquals(0.0040, r.estimatedCost(), 0.0001);
+    }
+
+    // =========================================================================
+    // Case 13: Fix 3 - Task Fit Without Reasoning Double Counting
+    // =========================================================================
+    @Test
+    @DisplayName("Case 13: Fix 3 验证 - 验证 Task Fit 基于 TaskType 评估多维能力匹配，消除纯 reasoning 重复加权")
+    void case13_taskFitNoReasoningDoubleCounting() {
+        // Model A: high reasoning (95), low coding (30)
+        ModelProfile modelReas = new ModelProfile(
+                "model-reas", "generic", "Model Reasoning", true,
+                new ModelCapabilities(95, 70, 30, 40, 0, 0, 80),
+                new ModelFeatures(SupportStatus.UNSUPPORTED, SupportStatus.UNSUPPORTED, SupportStatus.UNSUPPORTED),
+                new ModelLimits(65536L, 4096L),
+                new ModelPricing(BigDecimal.valueOf(1.0), BigDecimal.valueOf(2.0), "USD")
+        );
+
+        // Model B: medium reasoning (70), high coding (95)
+        ModelProfile modelCode = new ModelProfile(
+                "model-code", "generic", "Model Coding", true,
+                new ModelCapabilities(70, 80, 95, 80, 0, 0, 80),
+                new ModelFeatures(SupportStatus.UNSUPPORTED, SupportStatus.UNSUPPORTED, SupportStatus.UNSUPPORTED),
+                new ModelLimits(65536L, 4096L),
+                new ModelPricing(BigDecimal.valueOf(1.0), BigDecimal.valueOf(2.0), "USD")
+        );
+
+        // Task: CODE_GENERATION
+        RoutingRequirement codeReq = new RoutingRequirement(
+                TaskType.CODE_GENERATION, 70, 80, 90, 60, 0, false, 8192L, 4096L, "agent",
+                RequirementEvidence.empty(), LatencySensitivity.LOW
+        );
+
+        List<RankedModel> ranked = rankingEngine.rank(codeReq, List.of(modelReas, modelCode));
+
+        RankedModel codeRanked = ranked.stream().filter(r -> r.modelProfile().id().equals("model-code")).findFirst().orElseThrow();
+        RankedModel reasRanked = ranked.stream().filter(r -> r.modelProfile().id().equals("model-reas")).findFirst().orElseThrow();
+
+        // Model B with high coding has higher task fit for CODE_GENERATION than Model A (despite A's high reasoning)
+        assertTrue(codeRanked.breakdown().requirementFit() > reasRanked.breakdown().requirementFit());
+    }
+
+    // =========================================================================
     // Case 10: Legacy Router Consistency & Store Integration
     // =========================================================================
     @Test

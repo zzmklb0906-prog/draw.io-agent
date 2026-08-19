@@ -67,6 +67,13 @@ public class RuleBasedRoutingRequirementAnalyzer implements RoutingRequirementAn
                 expectedOutput
         );
 
+        LatencySensitivity latencySensitivity = switch (taskType) {
+            case SIMPLE_EDIT, FORMAT, GENERAL_CHAT -> LatencySensitivity.HIGH;
+            case ANALYZE, DRAWIO_REVIEW, STRUCTURED_GENERATION -> LatencySensitivity.NORMAL;
+            case DIAGNOSE, CODE_GENERATION, DRAWIO_GENERATION, TOOL_ORCHESTRATION -> LatencySensitivity.LOW;
+            default -> LatencySensitivity.NORMAL;
+        };
+
         RoutingRequirement base = new RoutingRequirement(
                 taskType,
                 clamp(baseDemands.reasoning()),
@@ -78,7 +85,8 @@ public class RuleBasedRoutingRequirementAnalyzer implements RoutingRequirementAn
                 minContextTokens,
                 expectedOutput,
                 context.agentName(),
-                evidence
+                evidence,
+                latencySensitivity
         );
 
         // Apply matching Agent requirement policy

@@ -1,7 +1,9 @@
 package cn.bugstack.ai.domain.agent.service.llm.routing.ranking;
 
 import cn.bugstack.ai.domain.agent.service.llm.catalog.ModelProfile;
+import cn.bugstack.ai.domain.agent.service.llm.routing.requirement.LatencySensitivity;
 import cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirement;
+import cn.bugstack.ai.domain.agent.service.llm.routing.requirement.TaskType;
 import cn.bugstack.ai.domain.agent.service.llm.routing.runtime.ModelRuntimeProfile;
 import cn.bugstack.ai.domain.agent.service.llm.routing.runtime.RuntimeHealth;
 import org.springframework.stereotype.Component;
@@ -163,20 +165,31 @@ public class DefaultModelRankingEngine implements ModelRankingEngine {
     // Requirement & Task Fit
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Requirement & Task Fit (Fix 3: Anti-Double-Counting via TaskType alignment)
+    // -------------------------------------------------------------------------
+
     private double calculateRequirementFit(RoutingRequirement requirement, ModelProfile model) {
-        if (model.capabilities() == null || requirement == null) {
+        if (model.capabilities() == null) {
             return 0.7;
         }
-        int complexity = requirement.estimatedComplexity();
-        int reasoning = model.capabilities().reasoning();
-
-        if (complexity >= 3) {
-            return reasoning >= 80 ? 1.0 : (reasoning / 80.0);
-        } else if (complexity <= 1) {
-            return 0.90;
-        } else {
-            return (reasoning >= 60 && reasoning <= 90) ? 0.95 : 0.80;
+        if (requirement == null || requirement.taskType() == null) {
+            return 0.8;
         }
+
+        cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCapabilities caps = model.capabilities();
+        TaskType taskType = requirement.taskType();
+
+        // Evaluate holistic profile affinity to task type emphasis (not repeating pure reasoning complexity)
+        return switch (taskType) {
+            case CODE_GENERATION -> (caps.coding() * 0.45 + caps.instructionFollowing() * 0.35 + caps.structuredOutput() * 0.20) / 100.0;
+            case STRUCTURED_GENERATION, DRAWIO_REVIEW -> (caps.structuredOutput() * 0.50 + caps.instructionFollowing() * 0.50) / 100.0;
+            case DRAWIO_GENERATION -> (caps.structuredOutput() * 0.40 + caps.instructionFollowing() * 0.30 + caps.reasoning() * 0.30) / 100.0;
+            case TOOL_ORCHESTRATION -> ((model.supportsToolCalling() ? 100.0 : 0.0) * 0.50 + caps.instructionFollowing() * 0.50) / 100.0;
+            case ANALYZE, DIAGNOSE -> (caps.reasoning() * 0.60 + caps.instructionFollowing() * 0.40) / 100.0;
+            case SIMPLE_EDIT, FORMAT, GENERAL_CHAT -> (caps.instructionFollowing() * 0.70 + caps.reasoning() * 0.30) / 100.0;
+            default -> (caps.instructionFollowing() * 0.50 + caps.reasoning() * 0.50) / 100.0;
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -195,7 +208,7 @@ public class DefaultModelRankingEngine implements ModelRankingEngine {
     }
 
     // -------------------------------------------------------------------------
-    // Latency Fit
+    // Latency Fit (Fix 1: Driven by RoutingRequirement.latencySensitivity)
     // -------------------------------------------------------------------------
 
     private double calculateLatencyFit(RoutingRequirement requirement, ModelRuntimeProfile runtime) {
@@ -203,20 +216,32 @@ public class DefaultModelRankingEngine implements ModelRankingEngine {
             return 0.5; // neutral score
         }
         double latencyMs = runtime.averageLatencyMs();
-        // Slower models drop score (baseline: 1000ms -> ~0.85, 3000ms -> ~0.60, 8000ms -> ~0.20)
-        double fit = Math.max(0.1, 1.0 - Math.min(0.9, latencyMs / 8000.0));
+        LatencySensitivity sensitivity = requirement != null && requirement.latencySensitivity() != null
+                ? requirement.latencySensitivity()
+                : LatencySensitivity.NORMAL;
+
+        // Baseline maximum acceptable response latency according to operational demand
+        double baselineMaxMs = switch (sensitivity) {
+            case HIGH -> 3000.0;   // aggressive drop for interactive edits / rapid chat
+            case NORMAL -> 6000.0; // standard drop for general generation
+            case LOW -> 12000.0;   // lenient tolerance for deep analysis / code generation
+        };
+
+        double fit = Math.max(0.05, 1.0 - Math.min(0.95, latencyMs / baselineMaxMs));
         return Math.max(0.0, Math.min(1.0, fit));
     }
 
     // -------------------------------------------------------------------------
-    // Cost Estimation & Cost Fit
+    // Cost Estimation & Cost Fit (Fix 2: Proper token semantics)
     // -------------------------------------------------------------------------
 
     private Double estimateCost(RoutingRequirement requirement, ModelProfile model) {
         if (model.pricing() == null || model.pricing().inputPerMillionTokens() == null || model.pricing().outputPerMillionTokens() == null) {
             return null;
         }
-        long inputTokens = requirement != null ? requirement.minContextWindowTokens() : 1000L;
+        // Correct semantics: estimatedInputTokens (consumption), expectedOutputTokens (generation)
+        // NOT minContextWindowTokens (which includes buffer & safety margins)
+        long inputTokens = requirement != null ? requirement.estimatedInputTokens() : 1000L;
         long outputTokens = requirement != null ? requirement.expectedOutputTokens() : 1000L;
 
         BigDecimal inPrice = model.pricing().inputPerMillionTokens();
