@@ -29,6 +29,7 @@ public class ModelRoutingService {
     private final cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector candidateModelSelector;
     private final cn.bugstack.ai.domain.agent.service.llm.routing.ranking.ModelRankingService modelRankingService;
+    private final cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService;
 
     public ModelRoutingService(@Value("${ai.agent.model-routing.enabled:true}") boolean enabled,
                                @Value("${ai.agent.model-routing.strategy:composite}") String strategyName,
@@ -39,7 +40,8 @@ public class ModelRoutingService {
                                cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
                                cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService,
                                cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector candidateModelSelector,
-                               cn.bugstack.ai.domain.agent.service.llm.routing.ranking.ModelRankingService modelRankingService) {
+                               cn.bugstack.ai.domain.agent.service.llm.routing.ranking.ModelRankingService modelRankingService,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirementService requirementService) {
         this.enabled = enabled;
         this.strategyName = strategyName;
         this.fastModel = fastModel;
@@ -50,6 +52,20 @@ public class ModelRoutingService {
         this.modelCatalogService = modelCatalogService;
         this.candidateModelSelector = candidateModelSelector;
         this.modelRankingService = modelRankingService;
+        this.requirementService = requirementService;
+    }
+
+    public ModelRoutingService(boolean enabled,
+                               String strategyName,
+                               String fastModel,
+                               String balancedModel,
+                               String reasoningModel,
+                               List<IModelRouterStrategy> strategies,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
+                               cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector candidateModelSelector,
+                               cn.bugstack.ai.domain.agent.service.llm.routing.ranking.ModelRankingService modelRankingService) {
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, modelCatalogService, candidateModelSelector, modelRankingService, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -61,7 +77,7 @@ public class ModelRoutingService {
                                cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
                                cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService,
                                cn.bugstack.ai.domain.agent.service.llm.routing.candidate.CandidateModelSelector candidateModelSelector) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, modelCatalogService, candidateModelSelector, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, modelCatalogService, candidateModelSelector, null, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -72,7 +88,7 @@ public class ModelRoutingService {
                                List<IModelRouterStrategy> strategies,
                                cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory,
                                cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService modelCatalogService) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, modelCatalogService, null, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, modelCatalogService, null, null, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -82,7 +98,7 @@ public class ModelRoutingService {
                                String reasoningModel,
                                List<IModelRouterStrategy> strategies,
                                cn.bugstack.ai.domain.agent.service.llm.routing.context.RoutingContextFactory contextFactory) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, null, null, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, contextFactory, null, null, null, null);
     }
 
     public ModelRoutingService(boolean enabled,
@@ -91,7 +107,7 @@ public class ModelRoutingService {
                                String balancedModel,
                                String reasoningModel,
                                List<IModelRouterStrategy> strategies) {
-        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, null, null, null, null);
+        this(enabled, strategyName, fastModel, balancedModel, reasoningModel, strategies, null, null, null, null, null);
     }
 
     public cn.bugstack.ai.domain.agent.service.llm.catalog.ModelCatalogService getModelCatalogService() {
@@ -126,7 +142,9 @@ public class ModelRoutingService {
         // Shadow Ranking (non-interfering observation of dynamic ranking recommendation)
         if (modelRankingService != null && context != null) {
             try {
-                var req = cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirement.defaultRequirement(context.agentName());
+                var req = requirementService != null
+                        ? requirementService.analyze(context)
+                        : cn.bugstack.ai.domain.agent.service.llm.routing.requirement.RoutingRequirement.defaultRequirement(context.agentName());
                 var ranked = modelRankingService.rank(req);
                 if (!ranked.isEmpty()) {
                     var top1 = ranked.get(0);
