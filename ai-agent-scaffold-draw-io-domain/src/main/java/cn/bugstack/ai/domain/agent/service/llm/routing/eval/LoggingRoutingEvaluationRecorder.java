@@ -13,9 +13,14 @@ public class LoggingRoutingEvaluationRecorder implements RoutingEvaluationRecord
 
     private final ObjectMapper objectMapper;
 
+    public LoggingRoutingEvaluationRecorder() {
+        this(new ObjectMapper().findAndRegisterModules());
+    }
+
     public LoggingRoutingEvaluationRecorder(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper().findAndRegisterModules();
     }
+
 
     @Override
     public void record(RoutingEvaluationRecord record) {

@@ -1,0 +1,158 @@
+{
+  "datasetId": "routing-quality-core",
+  "version": "v1.0.0",
+  "cases": [
+    {
+      "caseId": "structured-json-001",
+      "taskType": "STRUCTURED_GENERATION",
+      "agentName": "agent_general",
+      "prompt": "请输出一段任务分析结果，严格输出 JSON 格式，不要包含任何 markdown 代码块或说明文字。JSON 必须包含 title, steps, riskLevel 三个字段。",
+      "expected": {
+        "schemaJson": "{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"steps\":{\"type\":\"array\"},\"riskLevel\":{\"type\":\"string\"}},\"required\":[\"title\",\"steps\",\"riskLevel\"]}",
+        "requiredFields": ["title", "steps", "riskLevel"],
+        "forbiddenTerms": [],
+        "requiredElements": [],
+        "expectedIssues": [],
+        "minElementCount": null,
+        "minEdgeCount": null,
+        "preferredModel": "qwen3.7-flash",
+        "humanExpectedScore": 90.0
+      },
+      "groundTruthLevel": "DETERMINISTIC",
+      "tags": ["structured", "json", "deterministic"]
+    },
+    {
+      "caseId": "structured-json-002",
+      "taskType": "STRUCTURED_GENERATION",
+      "agentName": "agent_general",
+      "prompt": "请规划一个审批工作流定义，输出格式为纯 JSON。必须包含顶层 workflow 对象，workflow 内包含 name 和 nodes 数组两个字段。",
+      "expected": {
+        "schemaJson": "{\"type\":\"object\",\"properties\":{\"workflow\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"nodes\":{\"type\":\"array\"}},\"required\":[\"name\",\"nodes\"]}},\"required\":[\"workflow\"]}",
+        "requiredFields": ["workflow", "name", "nodes"],
+        "forbiddenTerms": [],
+        "requiredElements": [],
+        "expectedIssues": [],
+        "minElementCount": null,
+        "minEdgeCount": null,
+        "preferredModel": "qwen3.7-flash",
+        "humanExpectedScore": 90.0
+      },
+      "groundTruthLevel": "DETERMINISTIC",
+      "tags": ["structured", "nested-json", "deterministic"]
+    },
+    {
+      "caseId": "drawio-login-flow-001",
+      "taskType": "DRAWIO_GENERATION",
+      "agentName": "agent_drawer",
+      "prompt": "请生成一个标准的用户登录流程图 Draw.io XML（mxGraphModel）。流程包含：开始 -> 输入账号密码 -> 验证 -> 成功 / 失败两个分支结束。",
+      "expected": {
+        "schemaJson": null,
+        "requiredFields": [],
+        "forbiddenTerms": [],
+        "requiredElements": ["开始", "验证", "成功", "失败"],
+        "expectedIssues": [],
+        "minElementCount": 4,
+        "minEdgeCount": 3,
+        "preferredModel": "qwen3.7-plus",
+        "humanExpectedScore": 90.0
+      },
+      "groundTruthLevel": "RULE_BASED",
+      "tags": ["drawio", "flowchart", "login"]
+    },
+    {
+      "caseId": "drawio-order-flow-001",
+      "taskType": "DRAWIO_GENERATION",
+      "agentName": "agent_drawer",
+      "prompt": "请生成电商订单支付状态流转图的 Draw.io XML（mxGraphModel）。必须包含：提交订单、校验库存、发起支付、支付成功、支付超时五个关键状态节点及转移关系。",
+      "expected": {
+        "schemaJson": null,
+        "requiredFields": [],
+        "forbiddenTerms": [],
+        "requiredElements": ["提交订单", "校验库存", "发起支付", "支付成功", "支付超时"],
+        "expectedIssues": [],
+        "minElementCount": 5,
+        "minEdgeCount": 4,
+        "preferredModel": "qwen3.7-plus",
+        "humanExpectedScore": 90.0
+      },
+      "groundTruthLevel": "RULE_BASED",
+      "tags": ["drawio", "order", "state-machine"]
+    },
+    {
+      "caseId": "extract-fields-001",
+      "taskType": "EXTRACT",
+      "agentName": "agent_general",
+      "prompt": "从以下项目描述中准确提取关键信息：『本项目由张三负责牵头，联系电话13800138000，所属研发部，预计在2026-12-31前完成全部交付。』请提取项目负责人、电话、部门与交付日期。",
+      "expected": {
+        "schemaJson": null,
+        "requiredFields": ["张三", "13800138000", "研发部", "2026-12-31"],
+        "forbiddenTerms": [],
+        "requiredElements": [],
+        "expectedIssues": [],
+        "minElementCount": null,
+        "minEdgeCount": null,
+        "preferredModel": "qwen3.7-flash",
+        "humanExpectedScore": 95.0
+      },
+      "groundTruthLevel": "RULE_BASED",
+      "tags": ["extract", "nlp", "information-extraction"]
+    },
+    {
+      "caseId": "analyze-architecture-001",
+      "taskType": "ANALYZE",
+      "agentName": "agent_general",
+      "prompt": "分析以下高并发秒杀系统架构设计方案中的潜在风险并给出优化建议：『用户请求直接透传到数据库执行 update stock = stock - 1 where id = 1，无 Redis 缓存与分布式锁。』请分析其超卖、并发性能瓶颈及解决方案。",
+      "expected": {
+        "schemaJson": null,
+        "requiredFields": ["超卖", "并发", "锁", "redis"],
+        "forbiddenTerms": [],
+        "requiredElements": [],
+        "expectedIssues": [],
+        "minElementCount": null,
+        "minEdgeCount": null,
+        "preferredModel": "qwen3.7-plus",
+        "humanExpectedScore": 85.0
+      },
+      "groundTruthLevel": "RULE_BASED",
+      "tags": ["analyze", "architecture", "concurrency"]
+    },
+    {
+      "caseId": "diagnose-java-bug-001",
+      "taskType": "DIAGNOSE",
+      "agentName": "agent_general",
+      "prompt": "诊断以下 Java 双重检查锁定（DCL）单例模式实现的缺陷：\npublic class Singleton {\n    private static Singleton instance;\n    public static Singleton getInstance() {\n        if (instance == null) {\n            synchronized(Singleton.class) {\n                if (instance == null) instance = new Singleton();\n            }\n        }\n        return instance;\n    }\n}\n请指出缺少什么关键字并解释指令重排带来的可见性与半初始化风险。",
+      "expected": {
+        "schemaJson": null,
+        "requiredFields": ["volatile", "指令重排", "可见性"],
+        "forbiddenTerms": [],
+        "requiredElements": [],
+        "expectedIssues": [],
+        "minElementCount": null,
+        "minEdgeCount": null,
+        "preferredModel": "qwen3.8-max",
+        "humanExpectedScore": 90.0
+      },
+      "groundTruthLevel": "RULE_BASED",
+      "tags": ["diagnose", "java", "concurrency", "dcl"]
+    },
+    {
+      "caseId": "simple-edit-001",
+      "taskType": "SIMPLE_EDIT",
+      "agentName": "agent_general",
+      "prompt": "请将以下技术文章标题中的“初探”修改为“实战进阶”，仅输出修改后的最终标题文本，不要包含任何多余废话：『Spring Cloud 微服务架构设计初探』",
+      "expected": {
+        "schemaJson": null,
+        "requiredFields": ["Spring Cloud 微服务架构设计实战进阶"],
+        "forbiddenTerms": ["初探"],
+        "requiredElements": [],
+        "expectedIssues": [],
+        "minElementCount": null,
+        "minEdgeCount": null,
+        "preferredModel": "qwen3.7-flash",
+        "humanExpectedScore": 100.0
+      },
+      "groundTruthLevel": "RULE_BASED",
+      "tags": ["simple-edit", "low-complexity", "title-edit"]
+    }
+  ]
+}
