@@ -291,11 +291,56 @@ class RoutingEvaluationAnalyzerTest {
         assertEquals(92.5, reqStats.avgStructuredOutput(), 0.001);
         assertEquals(65.0, reqStats.avgToolCalling(), 0.001);
 
-        // High demand (>=85): reasoning=1/2 (50%), coding=1/2 (50%), structuredOutput=2/2 (100%), tool=0/2 (0%)
+        // High demand (>=85): reasoning=1/2 (50%), instructionFollowing=0/2 (0%), coding=1/2 (50%), structuredOutput=2/2 (100%), tool=0/2 (0%)
         assertEquals(0.50, reqStats.highDemandReasoningRate(), 0.001);
+        assertEquals(0.00, reqStats.highDemandInstructionFollowingRate(), 0.001);
         assertEquals(0.50, reqStats.highDemandCodingRate(), 0.001);
         assertEquals(1.00, reqStats.highDemandStructuredOutputRate(), 0.001);
         assertEquals(0.00, reqStats.highDemandToolCallingRate(), 0.001);
+    }
+
+    @Test
+    void requirementStatistics_includeInstructionFollowingSaturation() {
+        // 4 snapshots with instructionFollowing: 90, 95, 80, 40 (>=85: 2/4 = 50%)
+        RequirementSnapshot req1 = new RequirementSnapshot(70, 90, 60, 60, 60, false, 10000L, 4096L);
+        RequirementSnapshot req2 = new RequirementSnapshot(70, 95, 60, 60, 60, false, 10000L, 4096L);
+        RequirementSnapshot req3 = new RequirementSnapshot(70, 80, 60, 60, 60, false, 10000L, 4096L);
+        RequirementSnapshot req4 = new RequirementSnapshot(70, 40, 60, 60, 60, false, 10000L, 4096L);
+
+        List<RoutingEvaluationRecord> records = List.of(
+                createRecordWithReq("1", req1),
+                createRecordWithReq("2", req2),
+                createRecordWithReq("3", req3),
+                createRecordWithReq("4", req4)
+        );
+
+        RoutingEvaluationAnalysisReport report = analyzer.analyze(records);
+        RequirementDimensionStatistics reqStats = report.requirementStatistics();
+
+        assertEquals(4L, reqStats.sampleCount());
+        assertEquals(76.25, reqStats.avgInstructionFollowing(), 0.001);
+        assertEquals(0.50, reqStats.highDemandInstructionFollowingRate(), 0.001);
+    }
+
+    @Test
+    void instructionFollowingSaturation_generatesAdvisoryRecommendation() {
+        // 12 records with instructionFollowing >= 85 (100% saturation, threshold 70%)
+        List<RoutingEvaluationRecord> records = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            RequirementSnapshot req = new RequirementSnapshot(70, 90, 70, 70, 70, false, 10000L, 4096L);
+            records.add(createRecordWithReq("inv-inst-" + i, req));
+        }
+
+        RoutingEvaluationAnalysisReport report = analyzer.analyze(records);
+
+        assertFalse(report.insufficientSample());
+        Optional<RoutingCalibrationRecommendation> recOpt = report.recommendations().stream()
+                .filter(r -> "instructionFollowing".equals(r.dimension()))
+                .findFirst();
+
+        assertTrue(recOpt.isPresent(), "Must generate advisory recommendation for instructionFollowing saturation");
+        assertEquals("REQUIREMENT_DIMENSION_SATURATION", recOpt.get().code());
+        assertEquals(RoutingAnalysisIssueCategory.REQUIREMENT_CALIBRATION, recOpt.get().category());
     }
 
     // =========================================================================

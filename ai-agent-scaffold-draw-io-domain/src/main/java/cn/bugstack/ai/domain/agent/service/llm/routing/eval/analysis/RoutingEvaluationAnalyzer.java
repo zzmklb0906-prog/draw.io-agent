@@ -360,7 +360,7 @@ public class RoutingEvaluationAnalyzer {
 
     private RequirementDimensionStatistics computeRequirementStatistics(List<RequirementSnapshot> reqs) {
         if (reqs.isEmpty()) {
-            return new RequirementDimensionStatistics(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            return new RequirementDimensionStatistics(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
         }
 
         int n = reqs.size();
@@ -371,6 +371,7 @@ public class RoutingEvaluationAnalyzer {
         double sumTool = 0;
 
         long highReasoning = 0;
+        long highInstructionFollowing = 0;
         long highCoding = 0;
         long highStruct = 0;
         long highTool = 0;
@@ -385,6 +386,7 @@ public class RoutingEvaluationAnalyzer {
             sumTool += req.toolCalling();
 
             if (req.reasoning() >= thresh) highReasoning++;
+            if (req.instructionFollowing() >= thresh) highInstructionFollowing++;
             if (req.coding() >= thresh) highCoding++;
             if (req.structuredOutput() >= thresh) highStruct++;
             if (req.toolCalling() >= thresh) highTool++;
@@ -398,6 +400,7 @@ public class RoutingEvaluationAnalyzer {
                 sumStruct / n,
                 sumTool / n,
                 (double) highReasoning / n,
+                (double) highInstructionFollowing / n,
                 (double) highCoding / n,
                 (double) highStruct / n,
                 (double) highTool / n
@@ -537,6 +540,17 @@ public class RoutingEvaluationAnalyzer {
                     "Review reasoning demand heuristic extraction to verify whether routine tasks are judged too demanding."
                 ));
             }
+            if (reqStats.highDemandInstructionFollowingRate() > thresh) {
+                recs.add(new RoutingCalibrationRecommendation(
+                    "REQUIREMENT_DIMENSION_SATURATION",
+                    RoutingAnalysisSeverity.INFO,
+                    RoutingAnalysisIssueCategory.REQUIREMENT_CALIBRATION,
+                    "instructionFollowing",
+                    String.format("Instruction following requirement is high (>=%d) in %.1f%% of records",
+                            properties.getHighDemandScoreThreshold(), reqStats.highDemandInstructionFollowingRate() * 100),
+                    "Review AgentRequirementPolicy, TaskType detector baselines, and instruction-following demand calibration."
+                ));
+            }
         }
 
         // Deterministic sorting: Severity descending -> code ascending -> dimension ascending
@@ -571,7 +585,7 @@ public class RoutingEvaluationAnalyzer {
                 Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
                 new ScoreMarginStatistics(0, null, null, null, null, null, 0, 0.0),
                 new CostDeltaStatistics(0, null, null, 0, 0, 0, 0.0, 0.0, 0.0),
-                new RequirementDimensionStatistics(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                new RequirementDimensionStatistics(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
                 List.of(),
                 List.of(new RoutingCalibrationRecommendation(
                         "NO_DATA",
