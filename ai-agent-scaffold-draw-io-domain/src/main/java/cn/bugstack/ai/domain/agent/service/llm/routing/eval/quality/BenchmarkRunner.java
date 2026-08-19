@@ -103,6 +103,21 @@ public class BenchmarkRunner {
             );
         }
 
+        // -------------------------------------------------------------------------
+        // Phase 8.3: validate() must come BEFORE the dataset null/empty check.
+        // Rationale: once enabled=true, the operator has explicitly activated Benchmark.
+        // Invalid configuration must be surfaced immediately — an empty dataset must not
+        // silently mask misconfigured maxCases / timeout / qualityTieTolerance.
+        //
+        // Execution order (enforced):
+        //   1. enabled gate    → DISABLED  (no validate() call)
+        //   2. validate()      → IllegalArgumentException on invalid config
+        //   3. dataset check   → NO_DATA
+        //   4. model discovery → NO_MODELS
+        //   5. invocation      → COMPLETED
+        // -------------------------------------------------------------------------
+        properties.validate();
+
         if (dataset == null || dataset.cases() == null || dataset.cases().isEmpty()) {
             return buildStatusReport(
                     dataset != null ? dataset.datasetId() : "empty",
@@ -111,13 +126,6 @@ public class BenchmarkRunner {
                     "Dataset is null or contains no cases."
             );
         }
-
-        // -------------------------------------------------------------------------
-        // Phase 8.2: Validate configuration AFTER the enabled gate (so that disabled
-        // benchmarks never fail-fast on invalid properties during ordinary startup),
-        // but BEFORE any model discovery or invocation.
-        // -------------------------------------------------------------------------
-        properties.validate();
 
         // 1. Discover target models
         List<String> modelsToEvaluate;

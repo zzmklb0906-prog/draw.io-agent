@@ -320,6 +320,31 @@ class BenchmarkRunnerTest {
     }
 
     // =========================================================================
+    // Phase 8.3 — Validation Ordering: validate() before dataset check
+    // =========================================================================
+
+    @Test
+    void enabledBenchmark_emptyDatasetWithInvalidProperties_failsValidationFirst() {
+        // Verifies that validate() fires BEFORE the dataset empty-check.
+        // enabled=true + maxCases=0 + empty dataset → IllegalArgumentException (not NO_DATA).
+        CountingFakeInvoker countingInvoker = new CountingFakeInvoker();
+        BenchmarkExecutionProperties invalidProps = new BenchmarkExecutionProperties();
+        invalidProps.setEnabled(true);
+        invalidProps.setMaxCases(0);  // invalid: must be >= 1
+
+        BenchmarkRunner invalidRunner = buildRunner(countingInvoker, invalidProps);
+        // Intentionally empty dataset — without the ordering fix, this would have returned NO_DATA
+        BenchmarkDataset emptyDataset = new BenchmarkDataset("empty-ds", "v1", List.of());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> invalidRunner.run(emptyDataset, List.of("qwen3.7-flash")),
+                "Invalid config must surface via IllegalArgumentException even when dataset is empty");
+
+        assertEquals(0, countingInvoker.getInvocationCount(),
+                "No model invocations must occur before validation failure");
+    }
+
+    // =========================================================================
     // Existing tests (unchanged semantics, adapted for new fields)
     // =========================================================================
 
