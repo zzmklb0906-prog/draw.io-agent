@@ -51,6 +51,7 @@ public class DefaultModelConstraintFilter implements ModelConstraintFilter {
             List<ConstraintViolation> violations = new ArrayList<>();
 
             // 1. Null model profile check
+            // TODO: In future strict audit mode, record null candidates as INVALID_MODEL_METADATA rather than silently skipping.
             if (model == null) {
                 continue;
             }

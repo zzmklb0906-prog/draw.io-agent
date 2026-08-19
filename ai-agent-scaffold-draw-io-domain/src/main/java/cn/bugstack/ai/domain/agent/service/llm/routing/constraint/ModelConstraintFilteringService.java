@@ -25,6 +25,10 @@ public class ModelConstraintFilteringService {
     /**
      * Filters all currently enabled models from {@link ModelCatalogService} against the requirement.
      *
+     * <p><strong>TODO (Phase 5):</strong> When {@code result.accepted()} is empty (No Eligible Candidate),
+     * treat it as a first-class state and design explicit fallback paths (e.g. legacy route or explicit failure policy).
+     * Never assume {@code accepted} is non-empty.</p>
+     *
      * @param requirement the request requirements
      * @return filter result containing accepted and rejected models
      */
