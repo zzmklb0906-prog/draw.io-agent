@@ -1,5 +1,6 @@
 package cn.bugstack.ai.domain.agent.service.llm.routing.scoring;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -34,4 +35,31 @@ public class ModelScoringProperties {
 
     /** Penalty points deducted for UNKNOWN vision feature when vision is required (default 10.0). */
     private double unknownPenalty = 10.0;
+
+    @PostConstruct
+    public void validate() {
+        if (capabilityWeight < 0.0) {
+            throw new IllegalArgumentException("capabilityWeight must not be negative: " + capabilityWeight);
+        }
+        if (costWeight < 0.0) {
+            throw new IllegalArgumentException("costWeight must not be negative: " + costWeight);
+        }
+        if (contextHeadroomWeight < 0.0) {
+            throw new IllegalArgumentException("contextHeadroomWeight must not be negative: " + contextHeadroomWeight);
+        }
+        if (outputHeadroomWeight < 0.0) {
+            throw new IllegalArgumentException("outputHeadroomWeight must not be negative: " + outputHeadroomWeight);
+        }
+        if (certaintyWeight < 0.0) {
+            throw new IllegalArgumentException("certaintyWeight must not be negative: " + certaintyWeight);
+        }
+        if (unknownPenalty < 0.0) {
+            throw new IllegalArgumentException("unknownPenalty must not be negative: " + unknownPenalty);
+        }
+
+        double totalWeight = capabilityWeight + costWeight + contextHeadroomWeight + outputHeadroomWeight + certaintyWeight;
+        if (totalWeight <= 0.0) {
+            throw new IllegalStateException("Total scoring weight sum must be strictly positive: " + totalWeight);
+        }
+    }
 }

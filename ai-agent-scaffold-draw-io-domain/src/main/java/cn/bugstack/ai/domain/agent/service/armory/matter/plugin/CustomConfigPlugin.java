@@ -128,6 +128,26 @@ public class CustomConfigPlugin extends BasePlugin {
             );
         }
 
+        // Record unified Shadow Routing Comparison
+        cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource selectionSource =
+                explicitModel ? cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource.USER_EXPLICIT
+                        : cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison.SelectionSource.LEGACY_ROUTER;
+
+        Boolean matched = (shadowRecommendedModel != null && finalModel != null)
+                ? shadowRecommendedModel.equalsIgnoreCase(finalModel)
+                : null;
+
+        var comparison = new cn.bugstack.ai.domain.agent.service.llm.routing.scoring.RoutingShadowComparison(
+                finalModel,
+                shadowRecommendedModel,
+                matched,
+                shadowTopScore,
+                selectionSource
+        );
+
+        log.debug("Shadow Routing Comparison [invocationId={}]: actualModel={}, recommendedModel={}, matched={}, recommendedScore={}, actualSource={}",
+                context.invocationId(), comparison.actualModel(), comparison.recommendedModel(), comparison.matched(), comparison.recommendedScore(), comparison.actualSource());
+
         // 根据确定后的 finalModel 自动匹配多厂商 Provider 三元组 (BaseUrl, ApiKey, CompletionsPath)
         ModelProviderProperties.ProviderConfig providerConfig = providerRegistryService.findProviderConfig(finalModel);
 

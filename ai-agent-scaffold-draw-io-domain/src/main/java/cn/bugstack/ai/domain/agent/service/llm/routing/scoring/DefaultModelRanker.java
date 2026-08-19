@@ -68,12 +68,16 @@ public class DefaultModelRanker implements ModelRanker {
                 .<CandidateScore>comparingDouble(CandidateScore::totalScore).reversed()
                 // 2. Capability Fit (descending)
                 .thenComparing(Comparator.comparingDouble((CandidateScore cs) -> cs.breakdown().capabilityFit()).reversed())
-                // 3. Estimated Cost (ascending)
-                .thenComparingDouble(CandidateScore::estimatedCost)
+                // 3. Estimated Cost (ascending; missing pricing treated as POSITIVE_INFINITY so it never beats known positive costs)
+                .thenComparingDouble(DefaultModelRanker::sortableCost)
                 // 4. Model ID Lexical (ascending)
                 .thenComparing(cs -> cs.model().id(), String.CASE_INSENSITIVE_ORDER)
         );
 
         return new RankingResult(scores);
+    }
+
+    private static double sortableCost(CandidateScore score) {
+        return score.estimatedCost() >= 0.0 ? score.estimatedCost() : Double.POSITIVE_INFINITY;
     }
 }

@@ -120,8 +120,8 @@ public class WeightedModelScorer implements ModelScorer {
         double wCert = properties.getCertaintyWeight();
 
         double weightSum = wCap + wCost + wContext + wOutput + wCert;
-        if (weightSum <= 0) {
-            weightSum = 1.0;
+        if (weightSum <= 0.0) {
+            throw new IllegalStateException("Model scoring weight sum must be strictly positive: " + weightSum);
         }
 
         double totalScore = (capabilityFit * wCap

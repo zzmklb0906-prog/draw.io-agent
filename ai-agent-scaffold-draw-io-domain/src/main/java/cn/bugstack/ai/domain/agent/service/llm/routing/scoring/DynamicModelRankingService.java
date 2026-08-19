@@ -34,13 +34,9 @@ public class DynamicModelRankingService {
     }
 
     /**
-     * Ranks an explicit list of accepted candidate models.
-     *
-     * @param requirement the request requirements
-     * @param acceptedCandidates list of accepted candidate model profiles
-     * @return ranking result
+     * Internal helper to rank candidate models.
      */
-    public RankingResult rank(RoutingRequirement requirement, List<ModelProfile> acceptedCandidates) {
+    private RankingResult rank(RoutingRequirement requirement, List<ModelProfile> acceptedCandidates) {
         if (acceptedCandidates == null || acceptedCandidates.isEmpty()) {
             return RankingResult.empty();
         }

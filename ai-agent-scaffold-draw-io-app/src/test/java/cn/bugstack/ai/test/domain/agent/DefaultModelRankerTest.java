@@ -78,6 +78,27 @@ class DefaultModelRankerTest {
     }
 
     @Test
+    void missingPricing_doesNotWinCostTieBreak() {
+        RoutingRequirement req = createReq(50, 50, 50, 50, 50);
+        // Model with known positive price
+        ModelProfile modelKnown = createModel("known-price", 80, 80, 80, 80, 80, BigDecimal.valueOf(0.003), BigDecimal.valueOf(0.006));
+        // Model with missing pricing (pricing == null -> estimatedCost = -1.0)
+        ModelProfile modelMissing = new ModelProfile(
+                "missing-price", "qwen", "missing-price", true,
+                new ModelCapabilities(80, 80, 80, 80, 80, 80, 80),
+                new ModelFeatures(SupportStatus.SUPPORTED, SupportStatus.SUPPORTED, SupportStatus.SUPPORTED),
+                new ModelLimits(1048576L, 131072L),
+                null // null pricing
+        );
+
+        RankingResult result = ranker.rank(req, List.of(modelMissing, modelKnown));
+
+        // Missing price model must NOT win tie-break over known price model due to -1 sentinel
+        assertEquals("known-price", result.rankedCandidates().get(0).model().id(),
+                "Known price model must rank before missing price model in cost tie-break");
+    }
+
+    @Test
     void inputOrderIndependence_yieldsIdenticalRanking() {
         RoutingRequirement req = createReq(90, 90, 80, 80, 80);
         ModelProfile max = createModel("qwen3.8-max", 92, 95, 94, 95, 92, BigDecimal.valueOf(12.0), BigDecimal.valueOf(36.0));

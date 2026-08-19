@@ -170,6 +170,27 @@ class WeightedModelScorerTest {
     }
 
     @Test
+    void codingTask_prefersHighCodingCapabilityModel() {
+        // High coding demand
+        RoutingRequirement req = new RoutingRequirement(
+                TaskType.CODE_GENERATION,
+                80, 70, 95, 40, 20,
+                false, 10000L, 4096L, "agent_analyst", RequirementEvidence.empty()
+        );
+
+        // Model A: high coding (95), reasoning 85
+        ModelProfile modelA = createModel("modelA", 85, 80, 95, 60, 50, BigDecimal.valueOf(2.0), BigDecimal.valueOf(8.0));
+        // Model B: low coding (40), reasoning 95
+        ModelProfile modelB = createModel("modelB", 95, 90, 40, 60, 50, BigDecimal.valueOf(2.0), BigDecimal.valueOf(8.0));
+
+        CandidateScore scoreA = scorer.score(req, modelA, 0.05, 0.05);
+        CandidateScore scoreB = scorer.score(req, modelB, 0.05, 0.05);
+
+        assertTrue(scoreA.totalScore() > scoreB.totalScore(),
+                "Model with high coding capability must outscore model with low coding on code-heavy tasks");
+    }
+
+    @Test
     void visionUnknown_receivesUncertaintyPenalty_withoutHardRejection() {
         RoutingRequirement req = new RoutingRequirement(
                 TaskType.GENERAL_CHAT,
