@@ -107,31 +107,37 @@ public final class GovernedToolset implements BaseToolset {
             String requestId=context==null?"":Objects.toString(context.invocationContext().runConfig().customMetadata().get("platformRequestId"),"");
             String operationIdentity=requestId.isBlank()?invocation+":"+callId:requestId;
             String key=callId.isBlank()?null:operationIdentity+":"+circuitKey+":"+Integer.toHexString(Objects.hashCode(args));
-            IdempotencyService.Claim claim=idempotency.begin(owner,"TOOL_EXECUTION:"+name(),key,JSON.toJSONString(args));
-            if(claim.replay()){
-                Map<String,Object> cached=JSON.parseObject(claim.record().responseJson(),Map.class);
-                return Single.just(cached==null?Map.of():cached);
+            IdempotencyService.Claim claim = idempotency != null ? idempotency.begin(owner, "TOOL_EXECUTION:" + name(), key, JSON.toJSONString(args)) : null;
+            if (claim != null && claim.replay()) {
+                Map<String, Object> cached = JSON.parseObject(claim.record().responseJson(), Map.class);
+                return Single.just(cached == null ? Map.of() : cached);
             }
-            Semaphore permits=concurrency.computeIfAbsent(circuitKey,ignored->new Semaphore(Math.max(1,effectiveConcurrency),true));
-            AtomicInteger retryNo=new AtomicInteger();
-            return Single.defer(()->{
-                        if(!permits.tryAcquire())return Single.error(new IllegalStateException("Tool 并发已达上限: "+circuitKey));
+            Semaphore permits = concurrency.computeIfAbsent(circuitKey, ignored -> new Semaphore(Math.max(1, effectiveConcurrency), true));
+            AtomicInteger retryNo = new AtomicInteger();
+            return Single.defer(() -> {
+                        if (!permits.tryAcquire()) return Single.error(new IllegalStateException("Tool 并发已达上限: " + circuitKey));
                         return target.runAsync(args, context).doFinally(permits::release);
                     })
-                    .timeout(Math.max(1_000,effectiveTimeout), TimeUnit.MILLISECONDS)
-                    .retryWhen(errors->errors.flatMap(error->{
-                        int attempt=retryNo.incrementAndGet();
-                        if(!idempotent||attempt>effectiveRetries)return Flowable.error(error);
-                        monitor.toolRetry(invocation,callId,attempt+1,error);
-                        long delay=Math.min(retryBackoffMs*(1L<<(attempt-1)),30_000L);
-                        return Flowable.timer(delay,TimeUnit.MILLISECONDS);
+                    .timeout(Math.max(1_000, effectiveTimeout), TimeUnit.MILLISECONDS)
+                    .retryWhen(errors -> errors.flatMap(error -> {
+                        int attempt = retryNo.incrementAndGet();
+                        if (!idempotent || attempt > effectiveRetries) return Flowable.error(error);
+                        if (monitor != null) {
+                            monitor.toolRetry(invocation, callId, attempt + 1, error);
+                        }
+                        long delay = Math.min(retryBackoffMs * (1L << (attempt - 1)), 30_000L);
+                        return Flowable.timer(delay, TimeUnit.MILLISECONDS);
                     }))
                     .doOnSuccess(result -> {
                         circuit.failures.set(0); circuit.openUntil = 0;
-                        idempotency.complete(owner,"TOOL_EXECUTION:"+name(),key,key,JSON.toJSONString(result));
+                        if (idempotency != null) {
+                            idempotency.complete(owner, "TOOL_EXECUTION:" + name(), key, key, JSON.toJSONString(result));
+                        }
                     })
                     .doOnError(error -> {
-                        idempotency.fail(owner,"TOOL_EXECUTION:"+name(),key,error);
+                        if (idempotency != null) {
+                            idempotency.fail(owner, "TOOL_EXECUTION:" + name(), key, error);
+                        }
                         if (circuit.failures.incrementAndGet() >= failureThreshold) circuit.openUntil = System.currentTimeMillis() + cooldownMs;
                     });
         }
