@@ -10,14 +10,20 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.util.List;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Manual integration test for executing live model benchmark requests against actual LLM Providers.
  *
- * <p><strong>Safety Notice:</strong>
- * This test is strictly annotated with {@link Disabled} to ensure normal automated test runs
- * (e.g. `mvn test`) never make paid external network API requests.</p>
+ * <p><strong>Dual safety protection:</strong></p>
+ * <ol>
+ *   <li>This test is annotated with {@link Disabled}, so ordinary {@code mvn test} runs never
+ *       invoke paid external network APIs.</li>
+ *   <li>When manually re-enabling this test, you <em>must</em> set
+ *       {@link BenchmarkExecutionProperties#setEnabled(boolean) properties.setEnabled(true)};
+ *       the runner's internal enabled-gate would otherwise block execution even with
+ *       {@code @Disabled} removed.</li>
+ * </ol>
  */
 @Disabled("Manual benchmark only - invokes paid external LLM APIs")
 @SpringBootTest
@@ -26,8 +32,15 @@ class BenchmarkLiveIntegrationTest {
     @Autowired
     private BenchmarkRunner benchmarkRunner;
 
+    @Autowired
+    private BenchmarkExecutionProperties benchmarkExecutionProperties;
+
     @Test
     void runLiveBenchmark_executesManualEvaluation() {
+        // IMPORTANT: explicitly enable the runner gate for this live test.
+        // Do NOT rely on the default enabled=false being overridden elsewhere.
+        benchmarkExecutionProperties.setEnabled(true);
+
         BenchmarkCase drawCase = new BenchmarkCase(
                 "live-draw-1",
                 TaskType.DRAWIO_GENERATION,
@@ -42,6 +55,8 @@ class BenchmarkLiveIntegrationTest {
         BenchmarkReport report = benchmarkRunner.run(dataset, List.of("qwen3.7-flash", "qwen3.7-plus"));
 
         assertNotNull(report);
+        assertEquals(BenchmarkRunStatus.COMPLETED, report.runStatus(),
+                "Live benchmark should complete when enabled=true");
         System.out.println("Live Benchmark Report: " + report);
     }
 }

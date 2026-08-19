@@ -23,9 +23,20 @@ import java.util.stream.Collectors;
 /**
  * Orchestrator service for offline quality benchmarking against multiple LLM models.
  *
- * <p><strong>Safety Guarantee:</strong>
- * This runner is strictly executed on-demand in offline mode or during manual testing.
- * It is NEVER triggered automatically during application startup or online user requests.</p>
+ * <p><strong>Safety Guarantee — enabled gate:</strong><br>
+ * When {@link BenchmarkExecutionProperties#isEnabled()} is {@code false}, {@link #run} returns
+ * immediately with {@link BenchmarkRunStatus#DISABLED} and makes <em>zero</em> external model
+ * invocations.  The gate is enforced at the top of {@link #run}, not only in test harnesses.</p>
+ *
+ * <p><strong>Reliability vs Quality separation:</strong><br>
+ * Failed model executions are counted for {@link ModelOverallQuality#successRate() successRate}
+ * (reliability) but are <em>excluded</em> from {@link ModelOverallQuality#averageQuality() averageQuality}
+ * and {@link ModelOverallQuality#qualityPassRate() qualityPassRate} (response quality).
+ * A provider timeout is not a quality signal — it is a reliability signal.</p>
+ *
+ * <p><strong>Sequential execution:</strong><br>
+ * Benchmark cases are executed one at a time.  Parallel execution is a known limitation
+ * tracked for a future phase.</p>
  */
 @Slf4j
 @Service
@@ -71,13 +82,34 @@ public class BenchmarkRunner {
     /**
      * Executes the benchmark suite across the specified dataset and models.
      *
-     * @param dataset           The benchmark dataset to evaluate.
-     * @param targetModelNames  Optional list of model names. If null or empty, discovers all enabled models from catalog.
+     * <p><strong>Fix 1 — enabled safety gate:</strong>
+     * This method returns {@link BenchmarkRunStatus#DISABLED} immediately when
+     * {@link BenchmarkExecutionProperties#isEnabled()} is {@code false}.
+     * No invocations of {@link BenchmarkModelInvoker} are made in that case.</p>
+     *
+     * @param dataset          The benchmark dataset to evaluate.
+     * @param targetModelNames Optional list of model names. If null or empty, discovers all enabled models from catalog.
      * @return Deterministic, immutable {@link BenchmarkReport}.
      */
     public BenchmarkReport run(BenchmarkDataset dataset, List<String> targetModelNames) {
+        // -------------------------------------------------------------------------
+        // Fix 1: enabled safety gate — must be the FIRST check, before any I/O
+        // -------------------------------------------------------------------------
+        if (!properties.isEnabled()) {
+            log.info("Benchmark execution is DISABLED (benchmark.enabled=false). No model invocations will be made.");
+            return buildDisabledReport(
+                    dataset != null ? dataset.datasetId() : "unknown",
+                    dataset != null ? dataset.version() : "v1"
+            );
+        }
+
         if (dataset == null || dataset.cases() == null || dataset.cases().isEmpty()) {
-            return buildEmptyReport(dataset != null ? dataset.datasetId() : "empty", dataset != null ? dataset.version() : "v1");
+            return buildStatusReport(
+                    dataset != null ? dataset.datasetId() : "empty",
+                    dataset != null ? dataset.version() : "v1",
+                    BenchmarkRunStatus.NO_DATA,
+                    "Dataset is null or contains no cases."
+            );
         }
 
         // 1. Discover target models
@@ -94,7 +126,9 @@ public class BenchmarkRunner {
         }
 
         if (modelsToEvaluate.isEmpty()) {
-            return buildEmptyReport(dataset.datasetId(), dataset.version());
+            return buildStatusReport(dataset.datasetId(), dataset.version(),
+                    BenchmarkRunStatus.NO_MODELS,
+                    "No enabled models available in catalog and no targetModelNames provided.");
         }
 
         int maxCases = properties.getMaxCases() > 0 ? properties.getMaxCases() : 30;
@@ -107,7 +141,7 @@ public class BenchmarkRunner {
         Map<String, List<BenchmarkModelResult>> perModelResults = new TreeMap<>();
         Map<TaskType, Map<String, List<Double>>> taskTypeMatrixAccumulator = new EnumMap<>(TaskType.class);
 
-        // 2. Iterate each case and model
+        // 2. Iterate each case and model (sequential execution — see Known Limitations)
         for (BenchmarkCase bCase : casesToRun) {
             List<BenchmarkModelResult> caseModelResults = new ArrayList<>();
 
@@ -125,8 +159,15 @@ public class BenchmarkRunner {
                     successfulModelExecutions++;
                 }
 
-                // Evaluate quality
-                ModelQualityScore qualityScore = evaluateQuality(bCase, rawResp);
+                // -------------------------------------------------------------------------
+                // Fix 2: Quality evaluation only runs on successful responses.
+                // Failed executions receive null qualityScore, NOT ModelQualityScore.failed().
+                // This prevents provider failures from entering quality statistics.
+                // -------------------------------------------------------------------------
+                ModelQualityScore qualityScore = null;
+                if (rawResp.success()) {
+                    qualityScore = evaluateQuality(bCase, rawResp);
+                }
 
                 // Estimate cost
                 Double estimatedCost = estimateCost(modelName, bCase, rawResp);
@@ -146,6 +187,7 @@ public class BenchmarkRunner {
                 caseModelResults.add(modelResult);
                 perModelResults.computeIfAbsent(modelName, k -> new ArrayList<>()).add(modelResult);
 
+                // TaskType matrix: only successful executions with quality scores
                 if (modelResult.success() && modelResult.qualityScore() != null) {
                     TaskType tt = bCase.taskType() != null ? bCase.taskType() : TaskType.UNKNOWN;
                     taskTypeMatrixAccumulator
@@ -199,6 +241,8 @@ public class BenchmarkRunner {
         return new BenchmarkReport(
                 dataset.datasetId(),
                 dataset.version(),
+                BenchmarkRunStatus.COMPLETED,
+                null,
                 dataset.cases().size(),
                 casesToRun.size(),
                 totalModelExecutions,
@@ -221,10 +265,7 @@ public class BenchmarkRunner {
     // =========================================================================
 
     private ModelQualityScore evaluateQuality(BenchmarkCase bCase, BenchmarkRawResponse rawResponse) {
-        if (!rawResponse.success()) {
-            return ModelQualityScore.failed("Execution failed: " + rawResponse.errorMessage());
-        }
-
+        // Caller guarantees rawResponse.success() == true before calling this method
         for (ResponseQualityEvaluator evaluator : evaluators) {
             if (evaluator.supports(bCase)) {
                 try {
@@ -293,6 +334,18 @@ public class BenchmarkRunner {
         }
     }
 
+    /**
+     * Aggregates per-model quality statistics.
+     *
+     * <p><strong>Fix 2 — Reliability vs Quality denominator separation:</strong></p>
+     * <ul>
+     *   <li>{@link ModelOverallQuality#successRate()} = successCount / executions (reliability)</li>
+     *   <li>{@link ModelOverallQuality#averageQuality()} is computed only over successful executions with non-null quality scores</li>
+     *   <li>{@link ModelOverallQuality#qualityPassRate()} = passCount / successCount (not / executions)</li>
+     *   <li>Failed executions are counted in {@code executions} and {@code successRate} but
+     *       are <em>excluded</em> from {@code averageQuality} and {@code qualityPassRate}.</li>
+     * </ul>
+     */
     private Map<String, ModelOverallQuality> computeModelQualityMap(Map<String, List<BenchmarkModelResult>> perModelResults) {
         Map<String, ModelOverallQuality> map = new TreeMap<>();
         for (Map.Entry<String, List<BenchmarkModelResult>> entry : perModelResults.entrySet()) {
@@ -302,10 +355,10 @@ public class BenchmarkRunner {
             long executions = list.size();
             long successCount = 0;
             long passCount = 0;
-            double qualitySum = 0;
+            double qualitySum = 0.0;
             long qualityCount = 0;
-            double latencySum = 0;
-            double costSum = 0;
+            double latencySum = 0.0;
+            double costSum = 0.0;
             long costCount = 0;
 
             for (BenchmarkModelResult r : list) {
@@ -313,7 +366,14 @@ public class BenchmarkRunner {
                     successCount++;
                     latencySum += r.latencyMillis();
                 }
-                if (r.qualityScore() != null) {
+                // ---------------------------------------------------------------
+                // Fix 2: only count quality when execution succeeded AND
+                //         a quality score is available.  Failures produce null
+                //         qualityScore (see BenchmarkRunner.run), so this guard
+                //         already excludes them.  The explicit r.success() check
+                //         makes the intent unambiguous.
+                // ---------------------------------------------------------------
+                if (r.success() && r.qualityScore() != null) {
                     if (r.qualityScore().passed()) passCount++;
                     qualitySum += r.qualityScore().totalScore();
                     qualityCount++;
@@ -324,12 +384,18 @@ public class BenchmarkRunner {
                 }
             }
 
+            double successRate = executions > 0 ? (double) successCount / executions : 0.0;
+            // averageQuality: null when no successful quality evaluations (not 0 — avoids false 0)
             Double avgQuality = qualityCount > 0 ? qualitySum / qualityCount : null;
             Double avgLatency = successCount > 0 ? latencySum / successCount : null;
             Double avgCost = costCount > 0 ? costSum / costCount : null;
-            double passRate = executions > 0 ? (double) passCount / executions : 0.0;
+            // qualityPassRate denominator is successCount (reliability excluded)
+            Double qualityPassRate = successCount > 0 ? (double) passCount / successCount : null;
 
-            map.put(model, new ModelOverallQuality(executions, successCount, passCount, passRate, avgQuality, avgLatency, avgCost));
+            map.put(model, new ModelOverallQuality(
+                    executions, successCount, successRate,
+                    passCount, qualityPassRate,
+                    avgQuality, avgLatency, avgCost));
         }
         return map;
     }
@@ -394,10 +460,21 @@ public class BenchmarkRunner {
         return recs;
     }
 
-    private BenchmarkReport buildEmptyReport(String datasetId, String version) {
+    // =========================================================================
+    // Report Builders
+    // =========================================================================
+
+    private BenchmarkReport buildDisabledReport(String datasetId, String version) {
+        return buildStatusReport(datasetId, version, BenchmarkRunStatus.DISABLED,
+                "Benchmark is disabled (benchmark.enabled=false). Set enabled=true to run.");
+    }
+
+    private BenchmarkReport buildStatusReport(String datasetId, String version, BenchmarkRunStatus status, String reason) {
         return new BenchmarkReport(
                 datasetId,
                 version,
+                status,
+                reason,
                 0,
                 0,
                 0,
@@ -410,7 +487,7 @@ public class BenchmarkRunner {
                 0,
                 0,
                 List.of(),
-                List.of("INSUFFICIENT_BENCHMARK_CASES: No benchmark cases or models available to execute."),
+                List.of(),
                 Instant.now()
         );
     }
