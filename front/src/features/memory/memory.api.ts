@@ -7,3 +7,7 @@ export const createMemory=(memory:{userId:string;projectId?:string;memoryType:st
 export const updateMemory=(memory:AgentMemory)=>request<AgentMemory>(`/api/v1/memories/${memory.memoryId}`,{method:'PUT',body:JSON.stringify({content:memory.content,structuredData:memory.structuredData,importance:memory.importance,confirmed:memory.confirmed})});
 export const queryMemoryEvidence=(id:string)=>request<MemoryEvidence[]>(`/api/v1/memories/${id}/evidence`);
 export const consolidateMemories=(projectId='')=>request<{scanned:number;merged:number;remaining:number;conflictCount:number;conflicts:Array<Record<string,string>>;strategy:string}>(`/api/v1/memories/consolidate?projectId=${encodeURIComponent(projectId)}`,{method:'POST'});
+export const queryMemoryRetrieve = (userId: string, projectId = '', query: string, limit = 8) =>
+  request<AgentMemory[]>(
+    `/api/v1/memories/retrieve?userId=${encodeURIComponent(userId)}&projectId=${encodeURIComponent(projectId)}&query=${encodeURIComponent(query)}&limit=${limit}`
+  );

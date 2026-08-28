@@ -5,3 +5,8 @@ export const queryInvocations = () => request<InvocationItem[]>('/api/v1/monitor
 export const queryInvocation = (id: string) => request<InvocationDetail>(`/api/v1/monitor/invocations/${encodeURIComponent(id)}`);
 export const querySessionInvocations = (sessionId:string) => request<InvocationItem[]>(`/api/v1/monitor/sessions/${encodeURIComponent(sessionId)}/invocations`);
 export const queryWorkflowDetail = (taskId:string) => request<WorkflowDetail>(`/api/v1/monitor/workflows/${encodeURIComponent(taskId)}`);
+export const submitCapabilityFeedback = (invocationId: string, body: { searchId: string; capabilityId: string; judgment: 'GOOD' | 'BAD'; note?: string }) =>
+  request<boolean>(`/api/v1/monitor/invocations/${encodeURIComponent(invocationId)}/capability-feedback`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });

@@ -30,7 +30,7 @@ spring:
       timeout: 3s
   mvc:
     async:
-      request-timeout: 10m
+      request-timeout: 20m
   config:
     import:
 #      - classpath:agent/test-agent-02.yml
@@ -46,9 +46,10 @@ ai:
       mode: ${AGENT_PERSISTENCE_MODE:postgres}
       root: ${AGENT_PERSISTENCE_ROOT:${user.dir}/data/agent-runtime}
     chat:
-      # false：ADK 等模型完成后返回最终 Event；NDJSON 仍用于状态、Tool、审批和最终结果传输。
-      streaming-enabled: ${AGENT_STREAMING_ENABLED:false}
+      # true：启用流式增量输出；false：ADK 等模型完成后返回最终 Event；SSE 用于状态、Tool、审批和最终结果传输。
+      streaming-enabled: ${AGENT_STREAMING_ENABLED:true}
       execution-timeout-ms: ${AGENT_EXECUTION_TIMEOUT_MS:900000}
+      stream-timeout-ms: ${AGENT_STREAM_TIMEOUT_MS:1200000}
     model-routing:
       enabled: ${MODEL_ROUTING_ENABLED:true}
       strategy: ${MODEL_ROUTING_STRATEGY:composite} # composite | semantic | classifier | rule

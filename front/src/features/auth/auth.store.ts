@@ -31,7 +31,7 @@ export interface LoginResult {
 interface AuthState {
   user: AuthUser | null;
   login: (username: string, password: string) => Promise<LoginResult>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -59,10 +59,24 @@ export const useAuthStore = create<AuthState>((set) => ({
       return { success: false, error: '网络连接失败，请检查后端服务是否启动' };
     }
   },
-  logout: () => {
-    sessionStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(STORAGE_KEY);
-    set({ user: null });
+  logout: async () => {
+    try {
+      const authRaw = storedAuth();
+      const auth = authRaw ? (JSON.parse(authRaw) as AuthUser) : null;
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (auth?.token) {
+        headers.Authorization = `Bearer ${auth.token}`;
+      }
+      await fetch(apiUrl('/api/v1/auth/logout'), {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+      }).catch(() => {});
+    } finally {
+      sessionStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEY);
+      set({ user: null });
+    }
   },
 }));
 

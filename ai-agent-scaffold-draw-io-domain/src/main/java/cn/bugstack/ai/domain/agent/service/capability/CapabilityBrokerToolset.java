@@ -50,7 +50,7 @@ public class CapabilityBrokerToolset implements BaseToolset {
                 CapabilityDescriptor d = item.capability();
                 Map<String,Object> map = new LinkedHashMap<>();
                 map.put("capabilityId", d.capabilityId()); map.put("type", d.type()); map.put("name", d.name());
-                map.put("description", d.description()); map.put("group", d.group()); map.put("riskLevel", d.riskLevel()); map.put("version",d.version());map.put("schemaVersion",d.schemaVersion());map.put("contentVersion",d.contentVersion()); map.put("score", item.score());
+                map.put("description", d.description()); map.put("group", d.group()); map.put("aliases", d.aliases()); map.put("riskLevel", d.riskLevel()); map.put("version",d.version());map.put("schemaVersion",d.schemaVersion());map.put("contentVersion",d.contentVersion()); map.put("score", item.score());
                 return map;
             }).toList();
             monitor.capabilitySearch(context.invocationId(),context.agentName(),context.functionCallId().orElse(""),result.snapshotId(),query,types,items,result.registrySize(),startedAt);
@@ -79,7 +79,9 @@ public class CapabilityBrokerToolset implements BaseToolset {
             String executionId=monitor.capabilityStarted(context.invocationId(),context.agentName(),context.functionCallId().orElse(""),snapshotId,"LOAD",d,Map.of(),startedAt);
             Map<String,Object> result = new LinkedHashMap<>();
             result.put("capabilityId", d.capabilityId()); result.put("type", d.type()); result.put("name", d.name());
-            result.put("description", d.description()); result.put("group", d.group()); result.put("riskLevel", d.riskLevel());
+            result.put("description", d.description()); result.put("group", d.group());
+            result.put("aliases", d.aliases()); result.put("examples", d.examples()); result.put("negativeExamples", d.negativeExamples());
+            result.put("riskLevel", d.riskLevel());
             result.put("inputSchema", d.inputSchema()); result.put("version", d.version());result.put("schemaVersion",d.schemaVersion());result.put("contentVersion",d.contentVersion());
             monitor.capabilityCompleted(context.invocationId(),executionId,"LOAD",d,startedAt,true,result,null);
             return Single.just(result);

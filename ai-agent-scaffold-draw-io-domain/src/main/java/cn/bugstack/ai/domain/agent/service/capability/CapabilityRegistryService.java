@@ -38,19 +38,33 @@ public class CapabilityRegistryService {
             result.put("functionDeclaration", declaration.toJson());
             return result;
         }).orElseGet(Map::of);
+        Map<String, Object> metadata = tool.customMetadata();
+        List<String> aliases = extractMetadataList(metadata, "aliases");
+        List<String> examples = extractMetadataList(metadata, "examples");
+        List<String> negativeExamples = extractMetadataList(metadata, "negativeExamples");
+        List<String> tags = tokenize(group + " " + tool.name() + " " + tool.description() + " " + String.join(" ", aliases)).stream().limit(12).toList();
+        String normalizedRisk = riskLevel == null || riskLevel.isBlank() ? "REQUIRES_APPROVAL" : riskLevel.toUpperCase(Locale.ROOT);
+        String contentPayload = tool.name() + "\n" + tool.description() + "\n" + aliases + "\n" + examples + "\n" + negativeExamples;
         CapabilityDescriptor descriptor = new CapabilityDescriptor(id, type, group, tool.name(), tool.description(),
-                tokenize(group + " " + tool.name() + " " + tool.description()).stream().limit(12).toList(),
-                riskLevel == null || riskLevel.isBlank() ? "REQUIRES_APPROVAL" : riskLevel.toUpperCase(), schema, 1,
-                fingerprint(JSON(schema)),fingerprint(tool.name()+"\n"+tool.description()));
+                tags, aliases, examples, negativeExamples,
+                normalizedRisk, schema, 1,
+                fingerprint(JSON(schema)), fingerprint(contentPayload));
         entries.put(id, new Entry(descriptor, (args, context) -> tool.runAsync(args, context)));
     }
 
     public void registerSkill(String group, Frontmatter skill, BaseTool loadSkill, BaseTool loadResource) {
         String id = "skill:" + normalize(group) + ":" + normalize(skill.name());
+        Map<String, Object> metadata = skill.metadata();
+        List<String> aliases = extractMetadataList(metadata, "aliases");
+        List<String> examples = extractMetadataList(metadata, "examples");
+        List<String> negativeExamples = extractMetadataList(metadata, "negativeExamples");
+        List<String> tags = tokenize(skill.name() + " " + skill.description() + " " + String.join(" ", aliases)).stream().limit(12).toList();
+        Map<String, Object> schema = Map.of("skillName", skill.name(), "supportsResource", loadResource != null);
+        String contentPayload = skill.name() + "\n" + skill.description() + "\n" + aliases + "\n" + examples + "\n" + negativeExamples;
         CapabilityDescriptor descriptor = new CapabilityDescriptor(id, "SKILL", group, skill.name(), skill.description(),
-                tokenize(skill.name() + " " + skill.description()).stream().limit(12).toList(), "READ_ONLY",
-                Map.of("skillName", skill.name(), "supportsResource", loadResource != null), 1,
-                fingerprint("skillName,supportsResource"),fingerprint(skill.name()+"\n"+skill.description()));
+                tags, aliases, examples, negativeExamples, "READ_ONLY",
+                schema, 1,
+                fingerprint("skillName,supportsResource"), fingerprint(contentPayload));
         entries.put(id, new Entry(descriptor, (args, context) -> {
             String resourcePath = Objects.toString(args.get("resourcePath"), "").trim();
             if (!resourcePath.isEmpty()) {
@@ -117,20 +131,138 @@ public class CapabilityRegistryService {
     }
 
     private Entry require(String id) { Entry entry = entries.get(id); if (entry == null) throw new IllegalArgumentException("能力不存在: " + id); return entry; }
+
     private double score(String query, Set<String> queryTokens, CapabilityDescriptor d) {
-        String haystack = (d.name() + " " + d.description() + " " + d.group() + " " + String.join(" ", d.tags())).toLowerCase();
-        double score = haystack.contains(query.toLowerCase()) && !query.isBlank() ? 8 : 0;
-        for (String token : queryTokens) if (haystack.contains(token)) score += token.length() > 1 ? 2 : .35;
-        if (d.name().equalsIgnoreCase(query.trim())) score += 12;
+        if (query == null || query.isBlank()) return 0;
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        double score = 0;
+
+        // 1. Exact ID match
+        if (d.capabilityId().equalsIgnoreCase(q)) {
+            score += 100.0;
+        }
+
+        // 2. Exact Name match
+        if (d.name().equalsIgnoreCase(q)) {
+            score += 80.0;
+        } else if (d.name().toLowerCase(Locale.ROOT).contains(q) || q.contains(d.name().toLowerCase(Locale.ROOT))) {
+            score += 25.0;
+        }
+
+        // 3. Aliases matching
+        for (String alias : d.aliases()) {
+            String a = alias.trim().toLowerCase(Locale.ROOT);
+            if (a.equalsIgnoreCase(q)) {
+                score += 50.0;
+                break;
+            } else if (a.contains(q) || q.contains(a)) {
+                score += 20.0;
+                break;
+            }
+        }
+
+        // 4. Positive Examples matching
+        for (String example : d.examples()) {
+            String ex = example.trim().toLowerCase(Locale.ROOT);
+            if (ex.equalsIgnoreCase(q)) {
+                score += 35.0;
+                break;
+            } else if (ex.contains(q) || q.contains(ex)) {
+                score += 18.0;
+                break;
+            }
+        }
+
+        // 5. Description, Group, Tags substring match
+        String descHaystack = (d.group() + " " + d.description() + " " + String.join(" ", d.tags())).toLowerCase(Locale.ROOT);
+        if (descHaystack.contains(q)) {
+            score += 8.0;
+        }
+
+        // 6. Token matches
+        for (String token : queryTokens) {
+            double tokenWeight = token.length() >= 3 ? 2.5 : (token.length() == 2 ? 1.5 : 0.3);
+
+            for (String alias : d.aliases()) {
+                if (alias.toLowerCase(Locale.ROOT).contains(token)) {
+                    score += tokenWeight * 2.5;
+                    break;
+                }
+            }
+
+            for (String example : d.examples()) {
+                if (example.toLowerCase(Locale.ROOT).contains(token)) {
+                    score += tokenWeight * 1.8;
+                    break;
+                }
+            }
+
+            if (d.name().toLowerCase(Locale.ROOT).contains(token)) {
+                score += tokenWeight * 2.0;
+            }
+
+            if (descHaystack.contains(token)) {
+                score += tokenWeight * 1.0;
+            }
+        }
+
+        // 7. Negative Examples matching
+        for (String neg : d.negativeExamples()) {
+            String n = neg.trim().toLowerCase(Locale.ROOT);
+            if (n.equalsIgnoreCase(q)) {
+                score -= 60.0;
+                break;
+            } else if (n.contains(q) || q.contains(n)) {
+                score -= 30.0;
+                break;
+            }
+        }
+
         return score;
     }
+
+    private static List<String> extractMetadataList(Map<String, Object> metadata, String key) {
+        if (metadata == null || key == null) return List.of();
+        Object raw = metadata.get(key);
+        if (raw == null) return List.of();
+        List<String> rawItems = new ArrayList<>();
+        if (raw instanceof String str) {
+            rawItems.add(str);
+        } else if (raw instanceof Collection<?> coll) {
+            for (Object item : coll) {
+                if (item instanceof String s) rawItems.add(s);
+            }
+        } else if (raw instanceof Object[] arr) {
+            for (Object item : arr) {
+                if (item instanceof String s) rawItems.add(s);
+            }
+        }
+        LinkedHashSet<String> set = new LinkedHashSet<>();
+        for (String item : rawItems) {
+            String trimmed = item.trim();
+            if (trimmed.isEmpty()) continue;
+            if (trimmed.length() > 200) {
+                trimmed = trimmed.substring(0, 200);
+            }
+            set.add(trimmed);
+            if (set.size() >= 16) break;
+        }
+        return List.copyOf(set);
+    }
+
     private static Set<String> tokenize(String value) {
         if (value == null || value.isBlank()) return Set.of();
-        String normalized = value.toLowerCase().replaceAll("[^\\p{L}\\p{N}_-]+", " ").trim();
+        String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}_-]+", " ").trim();
         LinkedHashSet<String> tokens = new LinkedHashSet<>();
         for (String word : normalized.split("\\s+")) {
-            if (!word.isBlank()) tokens.add(word);
-            if (word.length() >= 4) for (int i=0;i<word.length()-1;i++) tokens.add(word.substring(i,i+2));
+            if (!word.isBlank()) {
+                tokens.add(word);
+                if (word.length() >= 4) {
+                    for (int i = 0; i < word.length() - 1; i++) {
+                        tokens.add(word.substring(i, i + 2));
+                    }
+                }
+            }
         }
         return tokens;
     }

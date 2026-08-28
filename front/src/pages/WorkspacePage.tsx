@@ -4,8 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { AgentSelector } from '../features/agents/components/AgentSelector';
 import { queryAgents } from '../features/agents/agents.api';
 import { useAuthStore } from '../features/auth/auth.store';
-import { createSession, pauseWorkflow, queryWorkflow } from '../features/chat/chat.api';
-import { streamChat } from '../features/chat/chat.stream';
+import { createSession, pauseWorkflow, queryActiveRun, queryWorkflow } from '../features/chat/chat.api';
+import { clearActiveRunMetadata, getActiveRunMetadata, reattachChatStream, streamChat } from '../features/chat/chat.stream';
 import { useChatStore } from '../features/chat/chat.store';
 import type { ChatRequest, StreamEnvelope } from '../features/chat/chat.types';
 import { AgentProgress } from '../features/chat/components/AgentProgress';
@@ -22,6 +22,7 @@ import type { ConversationSnapshot } from '../features/history/history.types';
 import { deleteConversation, queryConversation, queryConversations, type ServerConversation } from '../features/history/history.api';
 import { ModelSettingsDialog } from '../features/settings/components/ModelSettingsDialog';
 import { useModelSettingsStore } from '../features/settings/model-settings.store';
+import { ArtifactHistoryModal } from '../features/artifacts/components/ArtifactHistoryModal';
 
 export function WorkspacePage() {
   const navigate = useNavigate();
@@ -35,6 +36,7 @@ export function WorkspacePage() {
   const abortRef = useRef<AbortController | null>(null);
   const draftCellsRef = useRef(new Map<string, string>());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [panel, setPanel] = useState<'history' | 'chat' | 'diagram'>('chat');
   const [notice, setNotice] = useState('');
   const [historyCollapsed, setHistoryCollapsed] = useState(() => localStorage.getItem('history-sidebar-collapsed') === 'true');
@@ -85,6 +87,7 @@ export function WorkspacePage() {
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    clearActiveRunMetadata();
     const state = useChatStore.getState();
     if (state.checkpointId) void pauseWorkflow(state.checkpointId)
       .then((checkpoint) => { state.setCheckpoint(checkpoint.checkpointId, checkpoint.revision, checkpoint.status); saveSnapshot(); })
@@ -103,6 +106,7 @@ export function WorkspacePage() {
   const newSession = useCallback(async () => {
     if (!chat.agentId) return '';
     abortRef.current?.abort();
+    clearActiveRunMetadata();
     saveSnapshot();
     chat.resetSession();
     diagram.clear();
@@ -125,6 +129,7 @@ export function WorkspacePage() {
 
   const changeAgent = async (agentId: string) => {
     abortRef.current?.abort();
+    clearActiveRunMetadata();
     saveSnapshot();
     chat.setAgent(agentId);
     chat.resetSession();
@@ -133,7 +138,7 @@ export function WorkspacePage() {
     setNotice('智能体已切换，请开始新任务。');
   };
 
-  const handleEvent = (requestId: string, event: StreamEnvelope) => {
+  const handleEvent = useCallback((requestId: string, event: StreamEnvelope) => {
     if (useChatStore.getState().activeRequestId !== requestId) return;
     const { chunk } = event;
     chat.setProgress(event.phase, event.phase);
@@ -171,7 +176,136 @@ export function WorkspacePage() {
       case 'error': chat.addMessage('system', chunk.content); chat.finishRequest('error'); break;
       case 'done': chat.finishRequest('done'); break;
     }
-  };
+  }, [chat, diagram]);
+
+  const resumeActiveRun = useCallback(async (runId: string, sessionId: string, conversationId?: string, initialCursor = 0) => {
+    if (useChatStore.getState().activeRequestId || abortRef.current) return;
+    const requestId = crypto.randomUUID();
+    chat.beginRequest(requestId);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      await reattachChatStream(
+        runId,
+        sessionId,
+        conversationId,
+        initialCursor,
+        controller.signal,
+        (event) => handleEvent(requestId, event),
+        () => {
+          chat.setProgress('thinking', '收到一条无法解析的流式数据，已跳过。');
+        },
+      );
+      if (useChatStore.getState().activeRequestId === requestId) chat.finishRequest('done');
+      saveSnapshot();
+      await conversationsQuery.refetch();
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        clearActiveRunMetadata(runId);
+      }
+    } finally {
+      if (useChatStore.getState().activeRequestId === requestId) {
+        chat.finishRequest('done');
+      }
+      abortRef.current = null;
+    }
+  }, [chat, conversationsQuery, handleEvent, saveSnapshot]);
+
+  const restoreConversation = useCallback(async (conversation: ConversationSnapshot) => {
+    abortRef.current?.abort();
+    saveSnapshot();
+    const remote: ServerConversation = await queryConversation(conversation.id);
+    let restoredXml = '';
+    const remoteMessages = remote.messages.map((message) => {
+      let approval;
+      let toolApproval;
+      if (message.type === 'APPROVAL' && message.contentJson) {
+        try {
+          approval = {
+            ...(JSON.parse(message.contentJson)),
+            decisionStatus: conversation.workflowStatus === 'WAITING_APPROVAL' ? 'PENDING' : 'COMPLETED',
+          };
+        } catch {
+          approval = undefined;
+        }
+      }
+      if (message.type === 'TOOL_APPROVAL' && message.contentJson) {
+        try {
+          toolApproval = {
+            ...(JSON.parse(message.contentJson)),
+            decisionStatus: conversation.workflowStatus === 'WAITING_TOOL_APPROVAL' ? 'PENDING' : 'HANDLED',
+          };
+        } catch {
+          toolApproval = undefined;
+        }
+      }
+      if (message.type === 'DRAWIO' && message.contentJson) {
+        try {
+          restoredXml = JSON.parse(message.contentJson).xml ?? restoredXml;
+        } catch {
+          /* malformed historical payload */
+        }
+      }
+      let content = message.content ?? '';
+      if (content.includes('[APPROVED_DRAWING_BRIEF]')) {
+        for (const line of content.split(/\r?\n/)) {
+          const start = line.indexOf('{"type"');
+          if (start < 0) continue;
+          try {
+            const structured = JSON.parse(line.slice(start));
+            if ((structured.type === 'drawio_done' || structured.type === 'drawio') && structured.content) {
+              restoredXml = structured.content;
+            }
+          } catch {
+            /* legacy partial JSON */
+          }
+        }
+        content = content
+          .split(/\r?\n/)
+          .filter((line) => !line.trim().startsWith('[APPROVED_DRAWING_BRIEF]') && !line.trim().startsWith('{"type":"drawio_'))
+          .join('\n')
+          .trim();
+        if (!content && restoredXml) content = '图表已生成完成，可在画布中继续编辑或导出。';
+      }
+      return {
+        id: message.id,
+        role: message.role,
+        content,
+        createdAt: new Date(message.createdAt).getTime(),
+        ...(approval ? { approval } : {}),
+        ...(toolApproval ? { toolApproval } : {}),
+      };
+    });
+    chat.restoreConversation(conversation.agentId, conversation.sessionId, remoteMessages, conversation.workflowStatus);
+    chat.setSession(conversation.sessionId, conversation.id);
+    if (conversation.checkpointId) {
+      chat.setCheckpoint(conversation.checkpointId, conversation.checkpointRevision ?? 0, conversation.workflowStatus);
+      try {
+        const checkpoint = await queryWorkflow(conversation.checkpointId);
+        chat.setCheckpoint(checkpoint.checkpointId, checkpoint.revision, checkpoint.status);
+      } catch {
+        setNotice('历史画布已恢复，但未能刷新后端 Checkpoint 状态。');
+      }
+    }
+    const xml = restoredXml || conversation.currentXml;
+    diagram.restoreSnapshot(xml, restoredXml || conversation.lastAiXml, conversation.diagramTitle);
+    history.setActive(conversation.id);
+    draftCellsRef.current.clear();
+    setPanel(conversation.agentId === '300000' ? 'diagram' : 'chat');
+    setNotice('已从数据库恢复会话。');
+
+    const activeMeta = getActiveRunMetadata(conversation.sessionId, conversation.id);
+    try {
+      const activeRun = await queryActiveRun(conversation.sessionId, conversation.id);
+      if (activeRun && activeRun.status === 'RUNNING') {
+        void resumeActiveRun(activeRun.runId, conversation.sessionId, conversation.id, 0);
+      } else if (activeMeta?.runId) {
+        clearActiveRunMetadata(activeMeta.runId);
+      }
+    } catch {
+      /* ignore active run query error */
+    }
+  }, [chat, diagram, history, resumeActiveRun, saveSnapshot]);
 
   const send = async (message: string, resume?: { checkpointId: string; revision: number; decision: 'APPROVE' | 'REVISE' | 'CONTINUE' | 'TOOL_APPROVE' | 'TOOL_DENY';toolCallId?:string;confirmed?:boolean;payload?:Record<string,unknown> }) => {
     setNotice('');
@@ -233,48 +367,24 @@ export function WorkspacePage() {
     }
   };
 
-  const restoreConversation = async (conversation: ConversationSnapshot) => {
-    abortRef.current?.abort();
-    saveSnapshot();
-    const remote:ServerConversation=await queryConversation(conversation.id);
-    let restoredXml='';
-    const remoteMessages=remote.messages.map((message)=>{
-      let approval;
-      let toolApproval;
-      if(message.type==='APPROVAL'&&message.contentJson){try{approval={...(JSON.parse(message.contentJson)),decisionStatus:conversation.workflowStatus==='WAITING_APPROVAL'?'PENDING':'COMPLETED'};}catch{approval=undefined;}}
-      if(message.type==='TOOL_APPROVAL'&&message.contentJson){try{toolApproval={...(JSON.parse(message.contentJson)),decisionStatus:conversation.workflowStatus==='WAITING_TOOL_APPROVAL'?'PENDING':'HANDLED'};}catch{toolApproval=undefined;}}
-      if(message.type==='DRAWIO'&&message.contentJson){try{restoredXml=JSON.parse(message.contentJson).xml ?? restoredXml;}catch{/* malformed historical payload */}}
-      let content=message.content ?? '';
-      if(content.includes('[APPROVED_DRAWING_BRIEF]')){
-        for(const line of content.split(/\r?\n/)){const start=line.indexOf('{"type"');if(start<0)continue;try{const structured=JSON.parse(line.slice(start));if((structured.type==='drawio_done'||structured.type==='drawio')&&structured.content)restoredXml=structured.content;}catch{/* legacy partial JSON */}}
-        content=content.split(/\r?\n/).filter((line)=>!line.trim().startsWith('[APPROVED_DRAWING_BRIEF]')&&!line.trim().startsWith('{"type":"drawio_')).join('\n').trim();
-        if(!content&&restoredXml)content='图表已生成完成，可在画布中继续编辑或导出。';
-      }
-      return {id:message.id,role:message.role,content,createdAt:new Date(message.createdAt).getTime(),...(approval?{approval}: {}),...(toolApproval?{toolApproval}:{})};
-    });
-    chat.restoreConversation(conversation.agentId, conversation.sessionId, remoteMessages, conversation.workflowStatus);
-    chat.setSession(conversation.sessionId,conversation.id);
-    if (conversation.checkpointId) {
-      chat.setCheckpoint(conversation.checkpointId, conversation.checkpointRevision ?? 0, conversation.workflowStatus);
-      try {
-        const checkpoint = await queryWorkflow(conversation.checkpointId);
-        chat.setCheckpoint(checkpoint.checkpointId, checkpoint.revision, checkpoint.status);
-      } catch {
-        setNotice('历史画布已恢复，但未能刷新后端 Checkpoint 状态。');
-      }
+  const initialRestoredRef = useRef(false);
+  useEffect(() => {
+    if (initialRestoredRef.current) return;
+    const snapshots = serverSnapshots;
+    if (!snapshots.length) return;
+    if (useChatStore.getState().sessionId) return;
+    initialRestoredRef.current = true;
+    const activeId = useHistoryStore.getState().activeId;
+    const target = (activeId ? snapshots.find((s) => s.id === activeId) : null) ?? snapshots[0];
+    if (target) {
+      void restoreConversation(target);
     }
-    const xml=restoredXml||conversation.currentXml;
-    diagram.restoreSnapshot(xml, restoredXml||conversation.lastAiXml, conversation.diagramTitle);
-    history.setActive(conversation.id);
-    draftCellsRef.current.clear();
-    setPanel(conversation.agentId === '300000' ? 'diagram' : 'chat');
-    setNotice('已从数据库恢复会话。');
-  };
+  }, [serverSnapshots, restoreConversation]);
 
-  const doLogout = () => {
+  const doLogout = async () => {
     abortRef.current?.abort();
     modelSettings.clear();
-    logout();
+    await logout();
     navigate('/login', { replace: true });
   };
 
@@ -286,6 +396,8 @@ export function WorkspacePage() {
           {agentsQuery.data && <AgentSelector agents={agentsQuery.data} value={chat.agentId} disabled={!!chat.activeRequestId} onChange={(id) => void changeAgent(id)} />}
           <span className="session-chip" title={chat.sessionId || '尚未创建'}>{chat.sessionId ? `Session ${chat.sessionId.slice(0, 8)}` : '未创建会话'}</span>
           <button className="button" disabled={!chat.agentId || !!chat.activeRequestId} onClick={() => void requestNewSession()}>新建会话</button>
+          <button className="button" onClick={() => setArtifactsOpen(true)}>产物版本 (Artifacts)</button>
+          <button className="button" onClick={() => navigate('/workspaces')}>工作区管理</button>
           <button className="button" onClick={() => setSettingsOpen(true)}>模型设置</button>
           <button className="button" onClick={() => window.open('/monitor', '_blank', 'noopener,noreferrer')}>运行监控 ↗</button>
           <button className="button" onClick={() => window.open('/eval', '_blank', 'noopener,noreferrer')}>Agent Eval ↗</button>
@@ -322,6 +434,12 @@ export function WorkspacePage() {
         </section>}
       </div>
       <ModelSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {artifactsOpen && (
+        <ArtifactHistoryModal
+          conversationId={chat.conversationId || history.activeId}
+          onClose={() => setArtifactsOpen(false)}
+        />
+      )}
     </main>
   );
 }

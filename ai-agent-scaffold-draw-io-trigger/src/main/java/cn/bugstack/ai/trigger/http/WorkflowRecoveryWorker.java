@@ -36,7 +36,7 @@ public class WorkflowRecoveryWorker {
     public void dispatch(){while(active.get()<Math.max(1,Math.min(concurrency,2))){var job=queue.claim(instanceId);if(job.isEmpty())return;active.incrementAndGet();workers.submit(()->{try{execute(job.get());}finally{active.decrementAndGet();}});}}
 
     private void execute(WorkflowRecoveryJob job){AtomicReference<String> invocation=new AtomicReference<>();try{
-        WorkflowCheckpointEntity cp=checkpoints.resume(job.checkpointId(),job.checkpointRevision(),"CONTINUE");
+        WorkflowCheckpointEntity cp=checkpoints.resumeRecovery(job.checkpointId(),job.checkpointRevision());
         String entry="ANALYSIS".equalsIgnoreCase(cp.getStage())?"agent_analyst":"DRAWING".equalsIgnoreCase(cp.getStage())?"agent_drawer":null;
         String prompt="DRAWING".equalsIgnoreCase(cp.getStage())?"[APPROVED_DRAWING_BRIEF]\n"+approvedPrompt(job.approvalJson()):job.originalPrompt();
         StringBuilder output=new StringBuilder();

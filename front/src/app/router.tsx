@@ -7,6 +7,7 @@ import { WorkspacePage } from '../pages/WorkspacePage';
 import { MonitorPage } from '../pages/MonitorPage';
 import { MemoryPage } from '../pages/MemoryPage';
 import { EvalPage } from '../pages/EvalPage';
+import { WorkspacesPage } from '../pages/WorkspacesPage';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Navigate to="/workspace" replace />, errorElement: <RouteErrorPage /> },
@@ -14,7 +15,13 @@ export const router = createBrowserRouter([
   {
     element: <ProtectedRoute />,
     errorElement: <RouteErrorPage />,
-    children: [{ path: '/workspace', element: <WorkspacePage /> }, { path: '/monitor', element: <MonitorPage /> }, { path: '/eval', element: <EvalPage /> }, { path: '/memories', element: <MemoryPage /> }],
+    children: [
+      { path: '/workspace', element: <WorkspacePage /> },
+      { path: '/workspaces', element: <WorkspacesPage /> },
+      { path: '/monitor', element: <MonitorPage /> },
+      { path: '/eval', element: <EvalPage /> },
+      { path: '/memories', element: <MemoryPage /> },
+    ],
   },
   { path: '*', element: <NotFoundPage /> },
 ]);

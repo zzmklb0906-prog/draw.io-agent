@@ -19,6 +19,10 @@ public interface IAgentService {
 
     Response<ChatResponseDTO> chat(ChatRequestDTO requestDTO);
 
-    ResponseBodyEmitter chatStream(ChatRequestDTO requestDTO);
+    Response<ChatStreamRunResponseDTO> createChatStreamRun(ChatRequestDTO requestDTO);
+
+    org.springframework.web.servlet.mvc.method.annotation.SseEmitter subscribeChatStream(String runId, Long after, String lastEventId);
+
+    Response<ChatStreamRunResponseDTO> queryActiveRun(String sessionId, String conversationId);
 
 }
