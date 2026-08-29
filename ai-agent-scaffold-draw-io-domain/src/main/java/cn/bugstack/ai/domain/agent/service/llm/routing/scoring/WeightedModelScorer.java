@@ -38,7 +38,7 @@ public class WeightedModelScorer implements ModelScorer {
                                 double maxCostInBatch) {
         if (model == null || model.capabilities() == null) {
             ScoreBreakdown emptyBreakdown = new ScoreBreakdown(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of("INVALID_CAPABILITY_METADATA"));
-            return new CandidateScore(model, 0.0, 0.0, emptyBreakdown);
+            return new CandidateScore(model, 0.0, 0.0, emptyBreakdown, false);
         }
 
         List<String> evidence = new ArrayList<>();
@@ -135,6 +135,9 @@ public class WeightedModelScorer implements ModelScorer {
         evidence.add(String.format("fit[reas=%.1f, inst=%.1f, code=%.1f, struct=%.1f, tool=%.1f] -> capFit=%.2f, cost=%.4f (score=%.1f), total=%.2f",
                 fitReasoning, fitInstruction, fitCoding, fitStructured, fitTool, capabilityFit, estimatedCost, costScore, totalScore));
 
+        // 7. Non-compensating Sufficiency Check
+        boolean sufficient = checkSufficiency(requirement, model, evidence);
+
         ScoreBreakdown breakdown = new ScoreBreakdown(
                 capabilityFit,
                 fitReasoning,
@@ -149,7 +152,55 @@ public class WeightedModelScorer implements ModelScorer {
                 evidence
         );
 
-        return new CandidateScore(model, totalScore, estimatedCost, breakdown);
+        return new CandidateScore(model, totalScore, estimatedCost, breakdown, sufficient);
+    }
+
+    public boolean checkSufficiency(RoutingRequirement requirement, ModelProfile model, List<String> evidence) {
+        if (model == null || model.capabilities() == null) {
+            return false;
+        }
+        if (requirement == null) {
+            return true;
+        }
+        double threshold = properties.getSufficiencyThreshold();
+        ModelCapabilities caps = model.capabilities();
+
+        List<String> shortfalls = new ArrayList<>();
+        if (requirement.reasoningRequired() > 0 && caps.reasoning() < requirement.reasoningRequired() * threshold) {
+            shortfalls.add(String.format("reasoning[%d < %.1f]", caps.reasoning(), requirement.reasoningRequired() * threshold));
+        }
+        if (requirement.instructionFollowingRequired() > 0 && caps.instructionFollowing() < requirement.instructionFollowingRequired() * threshold) {
+            shortfalls.add(String.format("instruction[%d < %.1f]", caps.instructionFollowing(), requirement.instructionFollowingRequired() * threshold));
+        }
+        if (requirement.codingRequired() > 0 && caps.coding() < requirement.codingRequired() * threshold) {
+            shortfalls.add(String.format("coding[%d < %.1f]", caps.coding(), requirement.codingRequired() * threshold));
+        }
+        if (requirement.structuredOutputRequired() > 0) {
+            if (caps.structuredOutput() < requirement.structuredOutputRequired() * threshold) {
+                shortfalls.add(String.format("structured[%d < %.1f]", caps.structuredOutput(), requirement.structuredOutputRequired() * threshold));
+            }
+            if (model.features() != null && model.features().structuredOutput() == SupportStatus.UNSUPPORTED) {
+                shortfalls.add("structured[UNSUPPORTED]");
+            }
+        }
+        if (requirement.toolCallingRequired() > 0) {
+            if (caps.toolCalling() < requirement.toolCallingRequired() * threshold) {
+                shortfalls.add(String.format("toolCalling[%d < %.1f]", caps.toolCalling(), requirement.toolCallingRequired() * threshold));
+            }
+            if (model.features() != null && model.features().toolCalling() == SupportStatus.UNSUPPORTED) {
+                shortfalls.add("toolCalling[UNSUPPORTED]");
+            }
+        }
+
+        boolean isSufficient = shortfalls.isEmpty();
+        if (evidence != null) {
+            if (isSufficient) {
+                evidence.add(String.format("sufficiency: SUFFICIENT (threshold=%.2f)", threshold));
+            } else {
+                evidence.add(String.format("sufficiency: INSUFFICIENT (%s)", String.join(", ", shortfalls)));
+            }
+        }
+        return isSufficient;
     }
 
     @Override

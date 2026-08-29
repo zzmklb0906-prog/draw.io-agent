@@ -18,6 +18,27 @@ MCP、Skills、Session Event 和工作流均由 Google ADK 承载，运行链路
 - 内置轻量 Invocation/Agent/Model/Tool/Token/压缩监控
 - 支持 PostgreSQL 模板驱动的运行时 ADK Subagent，以及 Agent/Model/Tool 统一瀑布调用链
 
+## 当前进度
+
+项目已完成可运行的前后端主链路，当前处于“功能集成完成、生产验收未完成”阶段：
+
+- 已完成：登录与工作区、会话与流式消息、Draw.io Artifact、Checkpoint/Pause/Resume、长期 Memory、动态 Subagent、Tool/Skill 治理、运行监控和 Agent Eval 基础能力。
+- 模型路由：Model Catalog、硬约束过滤、Agent-aware 需求分析和分层 cheapest-sufficient 排序已接管开发环境生产选择；用户显式模型优先，自动路由内部失败时有界回退旧路由器。
+- 自动化验证：已有后端路由/治理测试和前端 store/API/stream 测试；双实例恢复、真实 Provider、权限隔离和长上下文仍需要部署环境验收。
+- 生产阻断项：开发配置中不得保留真实 API Key 默认值，已暴露的 Key 必须轮换后再部署。
+
+下一步优先级：密钥清理与轮换 → 动态路由真实流量校准及 Provider 健康降级 → 补齐手工测试发现 Bug 的自动回归 → 多实例和权限验收。
+
+文档入口：
+
+- [测试清单](test-checklist.md)
+- [Bug 修复记录](fixed_bug.md)
+- [Agent Eval 平台](docs/agent-eval-platform.md)
+- [Checkpoint Pause/Resume](docs/checkpoint-pause-resume.md)
+- [动态 Subagent 与调用链](docs/dynamic-subagent-and-tracing.md)
+- [上下文工程](docs/agent-context-engineering.md)
+- [模型资料](api-model.md)
+
 后端架构、升级、YAML 装配、监控、上下文治理和项目介绍统一收录在
 [ADK 1.7 架构与交付指南](docs/adk-1.7-upgrade.md)，前端说明见 [front/README](front/README.md)。
 
@@ -26,7 +47,7 @@ MCP、Skills、Session Event 和工作流均由 Google ADK 承载，运行链路
 PostgreSQL 是用户、会话、消息、Checkpoint、ADK Event、Artifact、上下文快照和运行观测的事实源；Redis 只用于 JWT 注销名单、并发协调和最近消息热缓存。
 
 ```powershell
-docker compose -f docs/dev-ops/agent-platform-compose.yml up -d
+docker compose -f docs/dev-ops/docker-compose.yml up -d
 mvn install -DskipTests
 cd ai-agent-scaffold-draw-io-app
 mvn spring-boot:run -Dmaven.test.skip=true
@@ -126,9 +147,11 @@ Tool/MCP Result 超过请求级预算时转换为有标记的摘要；旧对话�
 
 ## 模型与能力路由
 
-规则型 Model Router 不额外调用模型。前端显式模型优先，否则可用 `MODEL_FAST`、
-`MODEL_BALANCED`、`MODEL_REASONING` 配置三档模型。复杂架构、跨模块和状态机任务可进入
-reasoning 档，摘要和格式任务进入 fast 档。
+前端显式模型优先。未显式选择时，生产链路使用不额外调用模型的分层动态 Router：先由任务类型确定
+Fast、Balanced 或 Reasoning 目标层级，再执行上下文、输出、Vision、Tool Calling 等硬约束过滤，最后在
+当前层选择最便宜的充分模型，不充分时才升级。摘要、提取、格式化和简单编辑从 Fast 开始；普通或不确定
+任务从 Balanced 开始；诊断、深度分析和 Draw.io 审查从 Reasoning 开始。自动路由失败或无候选时有界
+回退旧路由器；Top-3 仅用于评估快照，每个请求实际只选择一个模型。
 
 Skills 使用 ADK `SkillToolset` 的 Catalog → `load_skill` → `load_skill_resource` 按需加载，不把
 全部 Skill 正文放入上下文。`included-skills` 可把每个 Agent 可见目录限制在最多 32 个 Skill。

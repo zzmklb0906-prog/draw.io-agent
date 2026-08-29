@@ -24,18 +24,43 @@ public class AnalystAgentRequirementPolicy implements AgentRequirementPolicy {
 
     @Override
     public RoutingRequirement adjust(RoutingContext context, RoutingRequirement base) {
-        int reasoning = Math.min(100, Math.max(base.reasoningRequired(), 60));
-        int instruction = Math.min(100, Math.max(base.instructionFollowingRequired(), 90));
-        int coding = Math.min(100, Math.max(base.codingRequired(), 20));
-        int structured = Math.min(100, Math.max(base.structuredOutputRequired(), 88));
-        int toolCalling = Math.min(100, Math.max(base.toolCallingRequired(), 20));
-        long expectedOutput = Math.min(base.expectedOutputTokens(), 4096L);
-        if (expectedOutput <= 0) {
-            expectedOutput = 4096L;
-        }
+        boolean isLightweight = base.taskType() == TaskType.SIMPLE_EDIT
+                || base.taskType() == TaskType.FORMAT
+                || base.taskType() == TaskType.SUMMARIZE
+                || base.taskType() == TaskType.EXTRACT;
 
+        int reasoning;
+        int instruction;
+        int coding;
+        int structured;
+        int toolCalling;
+        long expectedOutput;
         List<String> adjustments = new ArrayList<>(base.evidence().adjustments());
-        adjustments.add("agent_analyst: high instruction-following (90) & structured JSON (88)");
+
+        if (isLightweight) {
+            // Task-aware adjustment: lightweight tasks do not inherit high reasoning/instruction/structured floors
+            reasoning = base.reasoningRequired();
+            instruction = Math.min(100, Math.max(base.instructionFollowingRequired(), 70));
+            coding = base.codingRequired();
+            structured = Math.min(100, Math.max(base.structuredOutputRequired(), 30));
+            toolCalling = base.toolCallingRequired();
+            expectedOutput = Math.min(base.expectedOutputTokens(), 1024L);
+            if (expectedOutput <= 0) {
+                expectedOutput = 512L;
+            }
+            adjustments.add("agent_analyst: lightweight task (" + base.taskType() + "), preserved baseline demands without high floors");
+        } else {
+            reasoning = Math.min(100, Math.max(base.reasoningRequired(), 60));
+            instruction = Math.min(100, Math.max(base.instructionFollowingRequired(), 90));
+            coding = Math.min(100, Math.max(base.codingRequired(), 20));
+            structured = Math.min(100, Math.max(base.structuredOutputRequired(), 88));
+            toolCalling = Math.min(100, Math.max(base.toolCallingRequired(), 20));
+            expectedOutput = Math.min(base.expectedOutputTokens(), 4096L);
+            if (expectedOutput <= 0) {
+                expectedOutput = 4096L;
+            }
+            adjustments.add("agent_analyst: high instruction-following (90) & structured JSON (88)");
+        }
 
         RequirementEvidence evidence = new RequirementEvidence(
                 base.evidence().taskSignals(),

@@ -122,6 +122,7 @@ public class ModelCatalogService {
         }
         provider = provider.trim().toLowerCase();
 
+        ModelTier tier = parseModelTier(id, config.getTier());
         ModelCapabilities capabilities = convertCapabilities(id, config.getCapabilities());
         ModelFeatures features = convertFeatures(config.getFeatures());
         ModelLimits limits = convertLimits(id, config.getLimits());
@@ -131,12 +132,28 @@ public class ModelCatalogService {
                 id,
                 provider,
                 modelName,
+                tier,
                 config.isEnabled(),
                 capabilities,
                 features,
                 limits,
                 pricing
         );
+    }
+
+    private ModelTier parseModelTier(String id, String tierStr) {
+        if (StringUtils.isBlank(tierStr)) {
+            throw new IllegalArgumentException(String.format(
+                    "Invalid model catalog entry [id=%s]: tier must not be blank, must be FAST, BALANCED, or REASONING",
+                    id));
+        }
+        try {
+            return ModelTier.valueOf(tierStr.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(String.format(
+                    "Invalid model catalog entry [id=%s]: unknown tier [%s], must be FAST, BALANCED, or REASONING",
+                    id, tierStr));
+        }
     }
 
     private ModelCapabilities convertCapabilities(String id, ModelCatalogProperties.CapabilitiesConfig config) {

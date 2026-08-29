@@ -73,7 +73,7 @@ public class DefaultModelConstraintFilter implements ModelConstraintFilter {
                         "Model profile is missing limits or features metadata"
                 ));
             } else {
-                // 4. Vision Hard Constraint
+                // 4. Vision Hard Constraint: only explicit SUPPORTED passes when visionRequired=true
                 if (requirement.visionRequired()) {
                     SupportStatus visionStatus = model.features().vision();
                     if (visionStatus == SupportStatus.UNSUPPORTED) {
@@ -83,10 +83,10 @@ public class DefaultModelConstraintFilter implements ModelConstraintFilter {
                                 "Task requires multimodal vision, but model does not support vision"
                         ));
                     } else if (visionStatus == SupportStatus.UNKNOWN) {
-                        warnings.add(new ModelConstraintWarning(
-                                model.id(),
+                        violations.add(new ConstraintViolation(
                                 ConstraintReason.VISION_SUPPORT_UNKNOWN,
-                                "Vision support is UNKNOWN; no hard rejection applied for vision"
+                                "features.vision",
+                                "Task requires multimodal vision, but model vision support is UNKNOWN"
                         ));
                     }
                 }

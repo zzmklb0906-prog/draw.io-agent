@@ -1,5 +1,7 @@
 package cn.bugstack.ai.domain.agent.service.llm.routing.scoring;
 
+import cn.bugstack.ai.domain.agent.service.llm.catalog.ModelTier;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -7,13 +9,19 @@ import java.util.Optional;
  * Result of Dynamic Model Ranking.
  *
  * <p>Contains an immutable list of ranked candidate models along with convenience methods
- * to access the top recommended model. Does NOT alter active runtime model execution.</p>
+ * to access the top recommended model, selection reason, and target tier.</p>
  */
 public record RankingResult(
-        List<CandidateScore> rankedCandidates
+        List<CandidateScore> rankedCandidates,
+        String selectionReason,
+        ModelTier targetTier
 ) {
     public RankingResult {
         rankedCandidates = rankedCandidates != null ? List.copyOf(rankedCandidates) : List.of();
+    }
+
+    public RankingResult(List<CandidateScore> rankedCandidates) {
+        this(rankedCandidates, "DYNAMIC_ROUTER", ModelTier.BALANCED);
     }
 
     /**
@@ -35,6 +43,6 @@ public record RankingResult(
     }
 
     public static RankingResult empty() {
-        return new RankingResult(List.of());
+        return new RankingResult(List.of(), "NO_CANDIDATE", null);
     }
 }

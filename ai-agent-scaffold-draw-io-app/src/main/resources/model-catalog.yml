@@ -21,6 +21,7 @@ ai:
         - id: qwen3.7-flash
           provider: qwen
           model-name: qwen3.7-flash
+          tier: FAST
           enabled: true
           capabilities:
             reasoning: 55
@@ -45,6 +46,7 @@ ai:
         - id: qwen3.7-plus
           provider: qwen
           model-name: qwen3.7-plus
+          tier: BALANCED
           enabled: true
           capabilities:
             reasoning: 75
@@ -69,6 +71,7 @@ ai:
         - id: qwen3.8-max
           provider: qwen
           model-name: qwen3.8-max
+          tier: REASONING
           enabled: true
           capabilities:
             reasoning: 92
@@ -93,6 +96,7 @@ ai:
         - id: qwen3.7-max
           provider: qwen
           model-name: qwen3.7-max
+          tier: REASONING
           enabled: false
           capabilities:
             reasoning: 90
@@ -120,6 +124,7 @@ ai:
         - id: deepseek-v4-pro-0813
           provider: deepseek
           model-name: deepseek-v4-pro-0813
+          tier: REASONING
           enabled: false
           capabilities:
             reasoning: 92
@@ -144,6 +149,7 @@ ai:
         - id: deepseek-v4-flash-0731
           provider: deepseek
           model-name: deepseek-v4-flash-0731
+          tier: FAST
           enabled: false
           capabilities:
             reasoning: 70
@@ -171,6 +177,7 @@ ai:
         - id: glm-5.2
           provider: glm
           model-name: glm-5.2
+          tier: BALANCED
           enabled: false
           capabilities:
             reasoning: 88
@@ -198,6 +205,7 @@ ai:
         - id: kimi-k2.7-code
           provider: kimi
           model-name: kimi-k2.7-code
+          tier: REASONING
           enabled: false
           capabilities:
             reasoning: 88

@@ -31,6 +31,7 @@ public class ModelCatalogProperties {
         private String id;
         private String provider;
         private String modelName;
+        private String tier;
         @Builder.Default
         private boolean enabled = false;
         private CapabilitiesConfig capabilities;

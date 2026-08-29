@@ -52,6 +52,7 @@ ai:
       stream-timeout-ms: ${AGENT_STREAM_TIMEOUT_MS:1200000}
     model-routing:
       enabled: ${MODEL_ROUTING_ENABLED:true}
+      dynamic-enabled: ${MODEL_DYNAMIC_ROUTING_ENABLED:true}
       strategy: ${MODEL_ROUTING_STRATEGY:composite} # composite | semantic | classifier | rule
       # 留空表示该档位继续使用 Agent 默认模型；显式前端模型永远优先。
       fast-model: ${MODEL_FAST:qwen3.7-flash}

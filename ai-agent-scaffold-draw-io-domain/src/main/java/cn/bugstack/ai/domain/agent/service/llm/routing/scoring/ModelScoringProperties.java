@@ -36,6 +36,9 @@ public class ModelScoringProperties {
     /** Penalty points deducted for UNKNOWN vision feature when vision is required (default 10.0). */
     private double unknownPenalty = 10.0;
 
+    /** Minimum capability-to-requirement ratio required for a model to be considered sufficient across all demanded dimensions (default 0.85). */
+    private double sufficiencyThreshold = 0.85;
+
     @PostConstruct
     public void validate() {
         if (capabilityWeight < 0.0) {
@@ -55,6 +58,9 @@ public class ModelScoringProperties {
         }
         if (unknownPenalty < 0.0) {
             throw new IllegalArgumentException("unknownPenalty must not be negative: " + unknownPenalty);
+        }
+        if (sufficiencyThreshold <= 0.0 || sufficiencyThreshold > 1.0) {
+            throw new IllegalArgumentException("sufficiencyThreshold must be between 0 (exclusive) and 1 (inclusive): " + sufficiencyThreshold);
         }
 
         double totalWeight = capabilityWeight + costWeight + contextHeadroomWeight + outputHeadroomWeight + certaintyWeight;

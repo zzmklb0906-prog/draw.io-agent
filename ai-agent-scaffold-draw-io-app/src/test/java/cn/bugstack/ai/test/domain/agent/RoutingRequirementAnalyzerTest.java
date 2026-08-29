@@ -105,6 +105,60 @@ class RoutingRequirementAnalyzerTest {
                 "High-confidence edit keywords must override analytical keywords");
     }
 
+    @Test
+    void analystPolicy_lightweightTask_notRaisedToHighFloors() {
+        RoutingContext ctx = contextFactory.create(request(userContent("修改标题为用户流程")), "agent_analyst");
+        RoutingRequirement req = analyzer.analyze(ctx);
+
+        assertEquals(TaskType.SIMPLE_EDIT, req.taskType());
+        // Must preserve low baseline demands for lightweight tasks rather than forcing high floors (60 / 88 / 90)
+        assertEquals(30, req.reasoningRequired(), "Lightweight simple edit reasoning demand must not be forced to floor 60");
+        assertEquals(30, req.structuredOutputRequired(), "Lightweight simple edit structured demand must not be forced to floor 88");
+        assertEquals(70, req.instructionFollowingRequired(), "Lightweight simple edit instruction demand should be moderate (70)");
+    }
+
+    @Test
+    void analystPolicy_summarizeAndExtract_treatedAsLightweight_notRaisedToHighFloors() {
+        RoutingContext summarizeCtx = contextFactory.create(request(userContent("帮我总结这段会议纪要")), "agent_analyst");
+        RoutingRequirement summarizeReq = analyzer.analyze(summarizeCtx);
+        assertEquals(TaskType.SUMMARIZE, summarizeReq.taskType());
+        assertEquals(40, summarizeReq.reasoningRequired(), "SUMMARIZE reasoning demand must not be forced to floor 60");
+        assertEquals(30, summarizeReq.structuredOutputRequired(), "SUMMARIZE structured demand must not be forced to floor 88");
+        assertEquals(70, summarizeReq.instructionFollowingRequired(), "SUMMARIZE instruction demand should be preserved at baseline 70");
+
+        RoutingContext extractCtx = contextFactory.create(request(userContent("提取关键实体和配置参数")), "agent_analyst");
+        RoutingRequirement extractReq = analyzer.analyze(extractCtx);
+        assertEquals(TaskType.EXTRACT, extractReq.taskType());
+        assertEquals(45, extractReq.reasoningRequired(), "EXTRACT reasoning demand must not be forced to floor 60");
+        assertEquals(60, extractReq.structuredOutputRequired(), "EXTRACT structured demand must not be forced to floor 88");
+        assertEquals(75, extractReq.instructionFollowingRequired(), "EXTRACT instruction demand should be preserved at baseline 75");
+    }
+
+    @Test
+    void taskTypeDetector_negatedArchitectureAnalysis_detectedAsSimpleEdit() {
+        RoutingContext ctx = contextFactory.create(request(userContent("不需要分析架构，只修改节点名称")), "agent_analyst");
+        RoutingRequirement req = analyzer.analyze(ctx);
+
+        assertEquals(TaskType.SIMPLE_EDIT, req.taskType());
+    }
+
+    @Test
+    void taskTypeDetector_actionIntentPrecedence_detectedAsSimpleEdit() {
+        RoutingContext ctx = contextFactory.create(request(userContent("把这个架构图的标题改成系统架构")), "agent_analyst");
+        RoutingRequirement req = analyzer.analyze(ctx);
+
+        assertEquals(TaskType.SIMPLE_EDIT, req.taskType());
+    }
+
+    @Test
+    void taskTypeDetector_englishEquivalents_detectedAsSimpleEdit() {
+        RoutingContext ctx1 = contextFactory.create(request(userContent("rename title to user login")), "agent_analyst");
+        assertEquals(TaskType.SIMPLE_EDIT, analyzer.analyze(ctx1).taskType());
+
+        RoutingContext ctx2 = contextFactory.create(request(userContent("just change the title to dashboard")), "agent_analyst");
+        assertEquals(TaskType.SIMPLE_EDIT, analyzer.analyze(ctx2).taskType());
+    }
+
     // =========================================================================
     // Agent-aware Requirement Comparison
     // =========================================================================

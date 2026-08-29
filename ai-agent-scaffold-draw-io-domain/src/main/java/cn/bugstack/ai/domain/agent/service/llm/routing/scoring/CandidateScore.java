@@ -9,5 +9,10 @@ public record CandidateScore(
         ModelProfile model,
         double totalScore,
         double estimatedCost,
-        ScoreBreakdown breakdown
-) {}
+        ScoreBreakdown breakdown,
+        boolean sufficient
+) {
+    public CandidateScore(ModelProfile model, double totalScore, double estimatedCost, ScoreBreakdown breakdown) {
+        this(model, totalScore, estimatedCost, breakdown, false);
+    }
+}

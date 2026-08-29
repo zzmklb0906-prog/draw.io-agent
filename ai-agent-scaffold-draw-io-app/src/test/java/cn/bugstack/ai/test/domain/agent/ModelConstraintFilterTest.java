@@ -81,11 +81,11 @@ class ModelConstraintFilterTest {
     }
 
     // =========================================================================
-    // Case 4: Vision UNKNOWN Semantics (UNKNOWN != UNSUPPORTED)
+    // Case 4: Vision UNKNOWN Semantics (UNKNOWN is rejected when visionRequired=true)
     // =========================================================================
 
     @Test
-    void case4_visionRequired_unknownVisionAcceptedWithWarning() {
+    void case4_visionRequired_unknownVisionRejected() {
         RoutingRequirement req = createRequirement(true, 10000L, 2048L, 50, 50);
         List<ModelProfile> candidates = List.of(
                 createModel("unknown-vision-model", true, SupportStatus.UNKNOWN, 131072L, 8192L, 80)
@@ -93,12 +93,12 @@ class ModelConstraintFilterTest {
 
         ModelFilterResult result = filter.filter(req, candidates);
 
-        // Must NOT be hard-rejected
-        assertEquals(1, result.accepted().size());
-        assertTrue(result.rejected().isEmpty());
-        // Must emit warning
-        assertEquals(1, result.warnings().size());
-        assertEquals(ConstraintReason.VISION_SUPPORT_UNKNOWN, result.warnings().get(0).reason());
+        // When visionRequired=true, UNKNOWN vision must be rejected
+        assertTrue(result.accepted().isEmpty(), "Model with UNKNOWN vision must be rejected when visionRequired=true");
+        assertEquals(1, result.rejected().size());
+        RejectedModel rejected = result.rejected().get(0);
+        assertEquals("unknown-vision-model", rejected.model().id());
+        assertTrue(rejected.violations().stream().anyMatch(v -> v.reason() == ConstraintReason.VISION_SUPPORT_UNKNOWN));
     }
 
     // =========================================================================

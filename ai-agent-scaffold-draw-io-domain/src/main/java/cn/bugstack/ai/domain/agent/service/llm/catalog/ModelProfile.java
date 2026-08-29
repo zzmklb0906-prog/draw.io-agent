@@ -18,9 +18,23 @@ public record ModelProfile(
         String id,
         String provider,
         String modelName,
+        ModelTier tier,
         boolean enabled,
         ModelCapabilities capabilities,
         ModelFeatures features,
         ModelLimits limits,
         ModelPricing pricing
-) {}
+) {
+    public ModelProfile(
+            String id,
+            String provider,
+            String modelName,
+            boolean enabled,
+            ModelCapabilities capabilities,
+            ModelFeatures features,
+            ModelLimits limits,
+            ModelPricing pricing
+    ) {
+        this(id, provider, modelName, ModelTier.BALANCED, enabled, capabilities, features, limits, pricing);
+    }
+}

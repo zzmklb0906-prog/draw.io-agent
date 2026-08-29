@@ -101,6 +101,44 @@ class DynamicModelRankingServiceTest {
     }
 
     @Test
+    void ambiguousTask_recommendsBalancedModel() {
+        // Ambiguous requirement: GENERAL_CHAT
+        RoutingRequirement req = new RoutingRequirement(
+                TaskType.GENERAL_CHAT,
+                40, 60, 10, 20, 10,
+                false, 10000L, 2048L, "agent_analyst", RequirementEvidence.empty()
+        );
+
+        ModelFilterResult filterResult = filteringService.filter(req);
+        RankingResult rankingResult = rankingService.rank(req, filterResult);
+
+        assertFalse(rankingResult.isEmpty());
+        CandidateScore top = rankingResult.topCandidate().orElseThrow();
+        assertEquals("qwen3.7-plus", top.model().id(),
+                "Ambiguous/default chat tasks must recommend Balanced tier model (qwen3.7-plus) rather than down-routing to Flash");
+        assertEquals("BALANCED_CHEAPEST_SUFFICIENT", rankingResult.selectionReason());
+    }
+
+    @Test
+    void drawioGenerationTask_withDefaultCatalogAndThreshold_routesToBalancedPlus() {
+        // Representative Draw.io generation task: demands 65 reasoning, 95 instruction, 55 coding, 98 structured, 88 tool
+        RoutingRequirement req = new RoutingRequirement(
+                TaskType.DRAWIO_GENERATION,
+                65, 95, 55, 98, 88,
+                false, 10000L, 16384L, "agent_drawer", RequirementEvidence.empty()
+        );
+
+        ModelFilterResult filterResult = filteringService.filter(req);
+        RankingResult rankingResult = rankingService.rank(req, filterResult);
+
+        assertFalse(rankingResult.isEmpty());
+        CandidateScore top = rankingResult.topCandidate().orElseThrow();
+        assertEquals("qwen3.7-plus", top.model().id(),
+                "Default catalog + calibrated threshold (0.85) must route representative Draw.io generation to Balanced qwen3.7-plus rather than escalating to max");
+        assertEquals("BALANCED_CHEAPEST_SUFFICIENT", rankingResult.selectionReason());
+    }
+
+    @Test
     void emptyAccepted_returnsEmptyRankingSafely() {
         // Requirement that exceeds all models (2M tokens context)
         RoutingRequirement req = new RoutingRequirement(

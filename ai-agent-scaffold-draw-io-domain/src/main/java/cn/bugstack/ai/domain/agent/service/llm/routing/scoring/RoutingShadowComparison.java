@@ -12,6 +12,7 @@ public record RoutingShadowComparison(
 ) {
     public enum SelectionSource {
         LEGACY_ROUTER,
-        USER_EXPLICIT
+        USER_EXPLICIT,
+        DYNAMIC_ROUTER
     }
 }

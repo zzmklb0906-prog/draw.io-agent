@@ -249,6 +249,53 @@ class ModelCatalogServiceTest {
     }
 
     // =========================================================================
+    // ModelTier Configuration Tests
+    // =========================================================================
+
+    @Test
+    void modelTier_explicitTierParsedCorrectly() {
+        ModelCatalogProperties props = new ModelCatalogProperties();
+        ModelCatalogProperties.ModelConfig fast = createValidModel("fast-model", "qwen", "fast-model", true);
+        fast.setTier("FAST");
+        ModelCatalogProperties.ModelConfig reasoning = createValidModel("reasoning-model", "qwen", "reasoning-model", true);
+        reasoning.setTier("REASONING");
+        props.setModels(List.of(fast, reasoning));
+
+        ModelCatalogService service = new ModelCatalogService(props);
+        assertEquals(ModelTier.FAST, service.findById("fast-model").orElseThrow().tier());
+        assertEquals(ModelTier.REASONING, service.findById("reasoning-model").orElseThrow().tier());
+    }
+
+    @Test
+    void modelTier_rejectsBlankTier() {
+        ModelCatalogProperties props = new ModelCatalogProperties();
+        ModelCatalogProperties.ModelConfig model = createValidModel("blank-tier-model", "qwen", "blank-tier-model", true);
+        model.setTier(null);
+        props.setModels(List.of(model));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new ModelCatalogService(props));
+        assertTrue(ex.getMessage().contains("tier must not be blank"));
+
+        model.setTier("   ");
+        IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
+                () -> new ModelCatalogService(props));
+        assertTrue(ex2.getMessage().contains("tier must not be blank"));
+    }
+
+    @Test
+    void modelTier_invalidTierThrowsIllegalArgumentException() {
+        ModelCatalogProperties props = new ModelCatalogProperties();
+        ModelCatalogProperties.ModelConfig model = createValidModel("invalid-tier-model", "qwen", "invalid-tier-model", true);
+        model.setTier("SUPER_FAST");
+        props.setModels(List.of(model));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new ModelCatalogService(props));
+        assertTrue(ex.getMessage().contains("unknown tier [SUPER_FAST]"));
+    }
+
+    // =========================================================================
     // Helper
     // =========================================================================
 
@@ -257,6 +304,7 @@ class ModelCatalogServiceTest {
                 .id(id)
                 .provider(provider)
                 .modelName(modelName)
+                .tier("BALANCED")
                 .enabled(enabled)
                 .capabilities(ModelCatalogProperties.CapabilitiesConfig.builder()
                         .reasoning(80)
