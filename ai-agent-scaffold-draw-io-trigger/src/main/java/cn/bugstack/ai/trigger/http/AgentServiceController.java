@@ -26,8 +26,10 @@ import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -146,9 +148,12 @@ public class AgentServiceController implements IAgentService {
     }
 
     @GetMapping("monitor/summary")
-    public Response<Map<String, Object>> monitorSummary(@RequestParam(required = false) String sessionId) {
+    public Response<Map<String, Object>> monitorSummary(
+            @RequestParam(required = false) String sessionId,
+            @RequestParam(required = false) Integer hours) {
+        int windowHours = (hours != null && (hours == 1 || hours == 24 || hours == 168)) ? hours : 24;
         Map<String, Object> live = lightweightMonitorService.summary(AuthenticatedUserContext.current());
-        Map<String, Object> persisted = runtimeObservationRepository.summary(AuthenticatedUserContext.current(), sessionId);
+        Map<String, Object> persisted = runtimeObservationRepository.summary(AuthenticatedUserContext.current(), sessionId, windowHours);
         Map<String, Object> data = new java.util.LinkedHashMap<>(persisted);
         data.put("registeredTools", live.getOrDefault("registeredTools", List.of()));
         data.put("registeredCapabilities", capabilityRegistryService.size());
@@ -159,18 +164,86 @@ public class AgentServiceController implements IAgentService {
                 .build();
     }
 
+    private static final Set<String> TERMINAL_INVOCATION_STATUSES = Set.of("SUCCESS", "ERROR", "FAILED", "INTERRUPTED");
+
     @GetMapping("monitor/invocations")
     public Response<List<Map<String, Object>>> monitorInvocations() {
         List<Map<String, Object>> live = lightweightMonitorService.list(AuthenticatedUserContext.current());
         List<Map<String, Object>> persisted = runtimeObservationRepository.listRecent(AuthenticatedUserContext.current(), 200);
         java.util.LinkedHashMap<String, Map<String, Object>> merged = new java.util.LinkedHashMap<>();
-        live.forEach(item -> merged.put(String.valueOf(item.get("invocationId")), item));
-        persisted.forEach(item -> merged.putIfAbsent(String.valueOf(item.get("invocationId")), item));
+        if (live != null) {
+            for (Map<String, Object> item : live) {
+                if (item != null && item.get("invocationId") != null) {
+                    merged.put(String.valueOf(item.get("invocationId")), new java.util.LinkedHashMap<>(item));
+                }
+            }
+        }
+        if (persisted != null) {
+            for (Map<String, Object> item : persisted) {
+                if (item == null || item.get("invocationId") == null) continue;
+                String id = String.valueOf(item.get("invocationId"));
+                Map<String, Object> existing = merged.get(id);
+                if (existing == null) {
+                    merged.put(id, new java.util.LinkedHashMap<>(item));
+                } else {
+                    mergeInvocation(existing, item);
+                }
+            }
+        }
         return Response.<List<Map<String, Object>>>builder()
                 .code(ResponseCode.SUCCESS.getCode())
                 .info(ResponseCode.SUCCESS.getInfo())
                 .data(new java.util.ArrayList<>(merged.values()))
                 .build();
+    }
+
+    private void mergeInvocation(Map<String, Object> target, Map<String, Object> persisted) {
+        Object targetTaskId = target.get("taskId");
+        Object persistedTaskId = persisted.get("taskId");
+        if ((targetTaskId == null || String.valueOf(targetTaskId).trim().isEmpty())
+                && persistedTaskId != null && !String.valueOf(persistedTaskId).trim().isEmpty()) {
+            target.put("taskId", persistedTaskId);
+        }
+
+        Object targetWorkflow = target.get("workflowName");
+        Object persistedWorkflow = persisted.get("workflowName");
+        boolean targetWorkflowBlank = targetWorkflow == null
+                || String.valueOf(targetWorkflow).trim().isEmpty()
+                || "unknown".equalsIgnoreCase(String.valueOf(targetWorkflow).trim());
+        boolean persistedWorkflowValid = persistedWorkflow != null
+                && !String.valueOf(persistedWorkflow).trim().isEmpty()
+                && !"unknown".equalsIgnoreCase(String.valueOf(persistedWorkflow).trim());
+        if (targetWorkflowBlank && persistedWorkflowValid) {
+            target.put("workflowName", persistedWorkflow);
+        }
+
+        Object liveStatus = target.get("status");
+        Object persistedStatus = persisted.get("status");
+        String liveStatusStr = liveStatus == null ? "" : String.valueOf(liveStatus).trim().toUpperCase(Locale.ROOT);
+        String persistedStatusStr = persistedStatus == null ? "" : String.valueOf(persistedStatus).trim().toUpperCase(Locale.ROOT);
+
+        boolean liveTerminal = TERMINAL_INVOCATION_STATUSES.contains(liveStatusStr);
+        boolean persistedTerminal = TERMINAL_INVOCATION_STATUSES.contains(persistedStatusStr);
+
+        if (!liveTerminal && persistedTerminal) {
+            target.put("status", persisted.get("status"));
+            if (persisted.containsKey("completedAt") && persisted.get("completedAt") != null) {
+                target.put("completedAt", persisted.get("completedAt"));
+            }
+            if (persisted.containsKey("durationMs") && persisted.get("durationMs") != null) {
+                target.put("durationMs", persisted.get("durationMs"));
+            }
+            if ("SUCCESS".equals(persistedStatusStr)) {
+                target.remove("error");
+                target.remove("errorMessage");
+            } else {
+                if (persisted.containsKey("error") && persisted.get("error") != null) {
+                    target.put("error", persisted.get("error"));
+                } else if (persisted.containsKey("errorMessage") && persisted.get("errorMessage") != null) {
+                    target.put("error", persisted.get("errorMessage"));
+                }
+            }
+        }
     }
 
     @GetMapping("monitor/invocations/{invocationId}")

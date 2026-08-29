@@ -125,6 +125,8 @@ public class LightweightMonitorService {
         AgentRecord agent = ensure(invocationId).agents.computeIfAbsent(agentName, AgentRecord::new);
         agent.modelStartedAt.set(System.currentTimeMillis());
         agent.modelCalls.incrementAndGet();
+        agent.currentCallInputTokens.set(0);
+        agent.currentCallOutputTokens.set(0);
         String actualModel = (agent.lastRoutedModel != null && !agent.lastRoutedModel.isBlank()) ? agent.lastRoutedModel : agentName;
         persist(()->persistence.modelStarted(invocationId,runId,agentName,actualModel,agent.modelStartedAt.get(),agent.inputTokens.get()));
     }
@@ -137,7 +139,9 @@ public class LightweightMonitorService {
         long start = agent.modelStartedAt.getAndSet(0);
         long now=System.currentTimeMillis(),duration=start>0?now-start:0;
         if (start > 0) agent.modelDurationMs.addAndGet(duration);
-        persist(()->persistence.modelCompleted(invocationId,runId,agentName,now,duration,agent.inputTokens.get(),agent.outputTokens.get(),"SUCCESS",""));
+        long deltaIn = agent.currentCallInputTokens.getAndSet(0);
+        long deltaOut = agent.currentCallOutputTokens.getAndSet(0);
+        persist(()->persistence.modelCompleted(invocationId,runId,agentName,now,duration,deltaIn,deltaOut,"SUCCESS",""));
     }
 
     public void modelFailed(String invocationId,String agentName,Throwable error){
@@ -147,8 +151,11 @@ public class LightweightMonitorService {
         AgentRecord agent=ensure(invocationId).agents.computeIfAbsent(agentName,AgentRecord::new);
         long start=agent.modelStartedAt.getAndSet(0),now=System.currentTimeMillis(),duration=start>0?now-start:0;
         if(start>0)agent.modelDurationMs.addAndGet(duration);
-        String message=error==null?"Model call failed":truncate(error.getMessage(),1000);
-        persist(()->persistence.modelCompleted(invocationId,runId,agentName,now,duration,agent.inputTokens.get(),agent.outputTokens.get(),"ERROR",message));
+        long deltaIn = agent.currentCallInputTokens.getAndSet(0);
+        long deltaOut = agent.currentCallOutputTokens.getAndSet(0);
+        String rawMessage=(error==null||error.getMessage()==null)?"Model call failed":error.getMessage();
+        String message=truncate(redactText(rawMessage),1000);
+        persist(()->persistence.modelCompleted(invocationId,runId,agentName,now,duration,deltaIn,deltaOut,"ERROR",message));
         // A provider failure may occur before ADK emits an Event or invokes afterRun.
         // Finalize here as the lifecycle service's invariant; duplicate completion is idempotent.
         runCompleted(invocationId,false,message);
@@ -185,32 +192,32 @@ public class LightweightMonitorService {
     }
 
     public void usage(String invocationId, String agentName, int input, int output, int total) {
-        InvocationRecord record = ensure(invocationId);
-        AgentRecord agent = record.agents.computeIfAbsent(agentName, AgentRecord::new);
-        if (input > 0) agent.inputTokens.set(input);
-        if (output > 0) agent.outputTokens.set(output);
-        if (total > 0) agent.totalTokens.set(total);
-        if (input > 0 || output > 0 || total > 0) agent.tokensEstimated = false;
-        record.recalculateTokens();
-    }
-
-    public void providerUsage(String invocationId, String agentName, int input, int output, int total) {
         if (invocationId == null || invocationId.isBlank()) return;
         InvocationRecord record = ensure(invocationId);
         AgentRecord agent = record.agents.computeIfAbsent(agentName, AgentRecord::new);
-        if (!agent.providerUsageSeen) {
-            agent.inputTokens.set(0); agent.outputTokens.set(0); agent.totalTokens.set(0); agent.providerUsageSeen = true;
+        int in = Math.max(0, input);
+        int out = Math.max(0, output);
+        int tot = total > 0 ? total : in + out;
+        synchronized (agent) {
+            if (!agent.providerUsageSeen) {
+                agent.inputTokens.set(0);
+                agent.outputTokens.set(0);
+                agent.totalTokens.set(0);
+                agent.providerUsageSeen = true;
+            }
+            agent.inputTokens.addAndGet(in);
+            agent.outputTokens.addAndGet(out);
+            agent.totalTokens.addAndGet(tot);
+            agent.currentCallInputTokens.addAndGet(in);
+            agent.currentCallOutputTokens.addAndGet(out);
+            agent.tokensEstimated = false;
         }
-        agent.inputTokens.addAndGet(Math.max(0, input));
-        agent.outputTokens.addAndGet(Math.max(0, output));
-        agent.totalTokens.addAndGet(total > 0 ? total : Math.max(0, input) + Math.max(0, output));
-        agent.tokensEstimated = false;
         record.recalculateTokens();
     }
 
     public void estimatedInput(String invocationId, String agentName, int tokens) {
         AgentRecord agent = ensure(invocationId).agents.computeIfAbsent(agentName, AgentRecord::new);
-        if (agent.inputTokens.get() == 0) agent.inputTokens.set(Math.max(0, tokens));
+        if (agent.tokensEstimated && agent.inputTokens.get() == 0) agent.inputTokens.set(Math.max(0, tokens));
         agent.totalTokens.set(agent.inputTokens.get() + agent.outputTokens.get());
         ensure(invocationId).recalculateTokens();
     }
@@ -276,7 +283,28 @@ public class LightweightMonitorService {
     }
 
     public void capabilityCompleted(String invocationId,String executionId,String action,CapabilityDescriptor descriptor,long startedAt,boolean success,Object result,Throwable error){
-        if(invocationId==null||invocationId.isBlank()||executionId==null||executionId.isBlank())return;long completedAt=System.currentTimeMillis(),duration=Math.max(0,completedAt-startedAt);String raw=result==null?"":com.alibaba.fastjson.JSON.toJSONString(result),summary=truncate(raw,1000),hash=sha256(raw),status=success?"SUCCESS":"ERROR",message=error==null?"":truncate(error.getMessage(),2000);Map<String,Object> event=new LinkedHashMap<>(descriptorMap(descriptor));event.put("event",action);event.put("executionId",executionId);event.put("status",status);event.put("durationMs",duration);event.put("resultSize",raw.length());event.put("resultHash",hash);event.put("resultSummary",summary);event.put("error",message);event.put("timestamp",completedAt);ensure(invocationId).capabilityEvents.add(event);runtimeEvent(invocationId,"CAPABILITY_"+action+"_COMPLETED",event);persist(()->persistence.capabilityExecutionCompleted(executionId,status,completedAt,duration,summary,raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,hash,0,message));
+        if(invocationId==null||invocationId.isBlank()||executionId==null||executionId.isBlank())return;
+        long completedAt=System.currentTimeMillis(),duration=Math.max(0,completedAt-startedAt);
+        String raw=result==null?"":com.alibaba.fastjson.JSON.toJSONString(result);
+        long rawBytes=raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        String hash=sha256(raw);
+        String status=success?"SUCCESS":"ERROR";
+        String summary=redactResultSummary(result);
+        String rawErrorMessage=(error==null||error.getMessage()==null)?"":error.getMessage();
+        String message=truncate(redactText(rawErrorMessage),2000);
+        Map<String,Object> event=new LinkedHashMap<>(descriptorMap(descriptor));
+        event.put("event",action);
+        event.put("executionId",executionId);
+        event.put("status",status);
+        event.put("durationMs",duration);
+        event.put("resultSize",rawBytes);
+        event.put("resultHash",hash);
+        event.put("resultSummary",summary);
+        event.put("error",message);
+        event.put("timestamp",completedAt);
+        ensure(invocationId).capabilityEvents.add(event);
+        runtimeEvent(invocationId,"CAPABILITY_"+action+"_COMPLETED",event);
+        persist(()->persistence.capabilityExecutionCompleted(executionId,status,completedAt,duration,summary,rawBytes,hash,0,message));
     }
 
     public synchronized List<Map<String, Object>> list() {
@@ -329,23 +357,64 @@ public class LightweightMonitorService {
 
     private void persist(Runnable action){if(persistence==null)return;try{action.run();}catch(Exception error){log.warn("Agent 观测数据持久化失败，主流程继续",error);}}
 
-    private void runtimeEvent(String invocationId,String type,Map<String,Object> payload){InvocationRecord r=records.get(invocationId);if(r!=null&&!r.sessionId.isBlank())persist(()->persistence.runtimeEvent(r.sessionId,invocationId,type,payload));}
+    private void runtimeEvent(String invocationId,String type,Map<String,Object> payload){
+        InvocationRecord r=records.get(invocationId);
+        if(r!=null&&!r.sessionId.isBlank()){
+            Map<String,Object> safePayload=safeMap(payload);
+            persist(()->persistence.runtimeEvent(r.sessionId,invocationId,type,safePayload));
+        }
+    }
     private static Map<String,Object> descriptorMap(CapabilityDescriptor d){Map<String,Object> m=new LinkedHashMap<>();m.put("capabilityId",d.capabilityId());m.put("capabilityType",d.type());m.put("capabilityGroup",d.group());m.put("capabilityName",d.name());m.put("capabilityVersion",d.version());m.put("schemaVersion",d.schemaVersion());m.put("contentVersion",d.contentVersion());m.put("riskLevel",d.riskLevel());return m;}
-    @SuppressWarnings("unchecked") private static Map<String,Object> safeMap(Map<String,Object> value){return (Map<String,Object>)redact(value);}
+    @SuppressWarnings("unchecked") private static Map<String,Object> safeMap(Map<String,Object> value){if(value==null)return Collections.emptyMap();return (Map<String,Object>)redact(value);}
     public Map<String,Object> redactToolResult(Map<String,Object> value){return safeMap(value);}
     private static String sha256(String value){try{byte[] bytes=java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));return java.util.HexFormat.of().formatHex(bytes);}catch(Exception ignored){return "";}}
 
     private static Object redact(Object value){
-        if(value instanceof Map<?,?> map){Map<String,Object> safe=new LinkedHashMap<>();map.forEach((key,item)->{String name=String.valueOf(key);safe.put(name,name.matches("(?i).*(password|passwd|secret|token|api.?key|authorization|cookie).*")?"***":redact(item));});return safe;}
+        if(value==null)return null;
+        if(value instanceof Map<?,?> map){
+            Map<String,Object> safe=new LinkedHashMap<>();
+            map.forEach((key,item)->{
+                String name=String.valueOf(key);
+                boolean sensitiveKey=name.matches("(?i).*(password|passwd|secret|token|api.?key|authorization|cookie).*");
+                safe.put(name,sensitiveKey?"***":redact(item));
+            });
+            return safe;
+        }
         if(value instanceof Collection<?> values)return values.stream().map(LightweightMonitorService::redact).toList();
-        String text=String.valueOf(value);return text.length()>2000?text.substring(0,2000)+"…":value;
+        if(value instanceof String s){
+            String redacted=redactText(s);
+            return redacted.length()>2000?redacted.substring(0,2000)+"…":redacted;
+        }
+        String text=String.valueOf(value);
+        return text.length()>2000?text.substring(0,2000)+"…":value;
+    }
+
+    private static String redactResultSummary(Object result){
+        if(result==null)return "";
+        Object sanitized;
+        if(result instanceof Map<?,?>||result instanceof Collection<?>){
+            sanitized=redact(result);
+        }else if(result instanceof String s){
+            sanitized=redactText(s);
+        }else if(result instanceof Number||result instanceof Boolean){
+            sanitized=result;
+        }else{
+            try{
+                Object parsed=com.alibaba.fastjson.JSON.toJSON(result);
+                sanitized=redact(parsed);
+            }catch(Exception e){
+                sanitized=redactText(String.valueOf(result));
+            }
+        }
+        String serialized=sanitized instanceof String s?s:com.alibaba.fastjson.JSON.toJSONString(sanitized);
+        return truncate(redactText(serialized),1000);
     }
 
     private static String truncate(String value, int max) {
         if (value == null) return "";
         return value.length() <= max ? value : value.substring(0, max) + "…";
     }
-    private static String redactText(String value){if(value==null)return "";return value.replaceAll("(?i)(password|passwd|secret|token|api[_-]?key|authorization|cookie)(\\s*[:=]\\s*)[^,}\\s]+","$1$2***");}
+    private static String redactText(String value){if(value==null)return "";return value.replaceAll("(?i)(password|passwd|secret|token|api[_-]?key|authorization|cookie)(\\s*[:=]\\s*(?:Bearer\\s+)?)[^,}\\s]+","$1$2***");}
 
     private static final class InvocationRecord {
         final String invocationId;
@@ -406,7 +475,7 @@ public class LightweightMonitorService {
     }
 
     private static final class AgentRecord {
-        final String name; volatile String lastRoutedModel = ""; volatile boolean tokensEstimated=true, providerUsageSeen=false; final AtomicLong startedAt=new AtomicLong(), completedAt=new AtomicLong(), modelStartedAt=new AtomicLong(), modelDurationMs=new AtomicLong(), modelCalls=new AtomicLong(), inputTokens=new AtomicLong(), outputTokens=new AtomicLong(), totalTokens=new AtomicLong();
+        final String name; volatile String lastRoutedModel = ""; volatile boolean tokensEstimated=true, providerUsageSeen=false; final AtomicLong startedAt=new AtomicLong(), completedAt=new AtomicLong(), modelStartedAt=new AtomicLong(), modelDurationMs=new AtomicLong(), modelCalls=new AtomicLong(), inputTokens=new AtomicLong(), outputTokens=new AtomicLong(), totalTokens=new AtomicLong(), currentCallInputTokens=new AtomicLong(), currentCallOutputTokens=new AtomicLong();
         AgentRecord(String name){this.name=name;}
         void finishModel(long now){ long start=modelStartedAt.getAndSet(0); if(start>0) modelDurationMs.addAndGet(now-start); }
         void forceComplete(long now){ completedAt.compareAndSet(0,now); finishModel(now); }

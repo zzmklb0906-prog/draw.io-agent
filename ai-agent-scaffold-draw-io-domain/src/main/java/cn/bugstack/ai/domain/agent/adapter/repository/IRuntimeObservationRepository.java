@@ -35,6 +35,5 @@ public interface IRuntimeObservationRepository {
     List<Map<String,Object>> capabilityExecutions(String username,String invocationId);
     List<Map<String,Object>> waterfall(String username,String invocationId);
     void capabilityFeedback(String username,String invocationId,String searchId,String capabilityId,String judgment,String note);
-    Map<String,Object> summary(String username);
-    Map<String,Object> summary(String username,String sessionId);
+    Map<String,Object> summary(String username,String sessionId,int hours);
 }

@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
-import { submitCapabilityFeedback } from './monitor.api';
+import { submitCapabilityFeedback, type CapabilityFeedbackJudgment } from './monitor.api';
 import type { CapabilityExecution, CapabilitySearch } from './monitor.types';
 
 const duration = (ms: number) => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
@@ -17,10 +17,10 @@ export function CapabilityTrace({
 }) {
   const [activeFeedbackKey, setActiveFeedbackKey] = useState<string | null>(null);
   const [noteMap, setNoteMap] = useState<Record<string, string>>({});
-  const [submittedMap, setSubmittedMap] = useState<Record<string, { judgment: 'GOOD' | 'BAD'; note?: string }>>({});
+  const [submittedMap, setSubmittedMap] = useState<Record<string, { judgment: CapabilityFeedbackJudgment; note?: string }>>({});
 
   const feedbackMutation = useMutation({
-    mutationFn: async (variables: { searchId: string; capabilityId: string; judgment: 'GOOD' | 'BAD'; note?: string }) => {
+    mutationFn: async (variables: { searchId: string; capabilityId: string; judgment: CapabilityFeedbackJudgment; note?: string }) => {
       if (!invocationId) throw new Error('缺少 invocationId，无法提交反馈');
       await submitCapabilityFeedback(invocationId, variables);
       return variables;
@@ -32,7 +32,7 @@ export function CapabilityTrace({
     },
   });
 
-  const handleFeedback = (searchId: string, capabilityId: string, judgment: 'GOOD' | 'BAD') => {
+  const handleFeedback = (searchId: string, capabilityId: string, judgment: CapabilityFeedbackJudgment) => {
     const key = `${searchId}-${capabilityId}`;
     const note = noteMap[key]?.trim();
     feedbackMutation.mutate({ searchId, capabilityId, judgment, note: note || undefined });
@@ -72,7 +72,7 @@ export function CapabilityTrace({
                   {invocationId && (
                     <div className="capability-feedback-ctrl">
                       {submitted ? (
-                        <span className="feedback-badge success">已反馈 {submitted.judgment === 'GOOD' ? '👍 有效' : '👎 不匹配'}</span>
+                        <span className="feedback-badge success">已反馈 {submitted.judgment === 'NO_IMPACT' ? '👍 有效' : '👎 不匹配'}</span>
                       ) : (
                         <>
                           <div className="feedback-buttons">
@@ -80,7 +80,7 @@ export function CapabilityTrace({
                               type="button"
                               className="button tiny"
                               disabled={feedbackMutation.isPending}
-                              onClick={() => handleFeedback(search.id, candidate.capabilityId, 'GOOD')}
+                              onClick={() => handleFeedback(search.id, candidate.capabilityId, 'NO_IMPACT')}
                               title="标记该能力检索准确"
                             >
                               👍 有效
@@ -89,7 +89,7 @@ export function CapabilityTrace({
                               type="button"
                               className="button tiny ghost"
                               disabled={feedbackMutation.isPending}
-                              onClick={() => handleFeedback(search.id, candidate.capabilityId, 'BAD')}
+                              onClick={() => handleFeedback(search.id, candidate.capabilityId, 'WRONG_SELECTION')}
                               title="标记该能力不匹配或冗余"
                             >
                               👎 不匹配

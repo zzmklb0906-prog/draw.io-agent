@@ -1,7 +1,7 @@
-﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { updateEvalCase } from '../eval/eval.api';
 import { queryMemoryRetrieve } from '../memory/memory.api';
-import { submitCapabilityFeedback } from './monitor.api';
+import { queryMonitorSummary, submitCapabilityFeedback } from './monitor.api';
 
 describe('monitor and eval Phase 1 & 2 APIs', () => {
   beforeEach(() => {
@@ -23,7 +23,7 @@ describe('monitor and eval Phase 1 & 2 APIs', () => {
     const result = await submitCapabilityFeedback('inv-999', {
       searchId: 'search-1',
       capabilityId: 'cap-web-search',
-      judgment: 'GOOD',
+      judgment: 'NO_IMPACT',
       note: '精准命中目标',
     });
 
@@ -39,8 +39,31 @@ describe('monitor and eval Phase 1 & 2 APIs', () => {
         body: JSON.stringify({
           searchId: 'search-1',
           capabilityId: 'cap-web-search',
-          judgment: 'GOOD',
+          judgment: 'NO_IMPACT',
           note: '精准命中目标',
+        }),
+      })
+    );
+
+    const mismatchResult = await submitCapabilityFeedback('inv-999', {
+      searchId: 'search-2',
+      capabilityId: 'cap-bad-tool',
+      judgment: 'WRONG_SELECTION',
+    });
+
+    expect(mismatchResult).toBe(true);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining('/api/v1/monitor/invocations/inv-999/capability-feedback'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-User-Id': 'tester',
+          Authorization: 'Bearer test-jwt',
+        }),
+        body: JSON.stringify({
+          searchId: 'search-2',
+          capabilityId: 'cap-bad-tool',
+          judgment: 'WRONG_SELECTION',
         }),
       })
     );
@@ -97,5 +120,46 @@ describe('monitor and eval Phase 1 & 2 APIs', () => {
       expect.stringContaining('/api/v1/memories/retrieve?userId=alice&projectId=project-x&query=%E6%B7%B1%E8%89%B2&limit=5'),
       expect.anything()
     );
+  });
+
+  it('queries monitor summary with time window hours and session params', async () => {
+    const mockSummary = {
+      windowHours: 24,
+      total: 10,
+      success: 8,
+      errors: 1,
+      active: 1,
+      successRate: 0.8889,
+      averageDurationMs: 250,
+      p95DurationMs: 500,
+      inputTokens: 1000,
+      outputTokens: 200,
+      totalTokens: 1200,
+      estimatedCost: 0,
+      registeredTools: ['drawio'],
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ code: '0000', data: mockSummary }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 1. Without params
+    const res1 = await queryMonitorSummary();
+    expect(res1).toEqual(mockSummary);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/monitor/summary', expect.anything());
+
+    // 2. With hours only
+    await queryMonitorSummary(undefined, 24);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/monitor/summary?hours=24', expect.anything());
+
+    // 3. With session and 1 hour
+    await queryMonitorSummary('sess-100', 1);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/monitor/summary?sessionId=sess-100&hours=1', expect.anything());
+
+    // 4. With session and 168 hours (7d)
+    await queryMonitorSummary('sess-200', 168);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/monitor/summary?sessionId=sess-200&hours=168', expect.anything());
   });
 });
