@@ -101,15 +101,21 @@ export const useChatStore = create<ChatState>((set) => ({
     checkpointId,
     checkpointRevision,
     ...(status ? { workflowStatus: status } : {}),
-    messages: state.messages.map((message) => message.approval?.checkpointId === checkpointId
-      ? { ...message, approval: { ...message.approval, revision: checkpointRevision } }
-      : message),
+    messages: state.messages.map((message) => {
+      const matches = !message.approval?.checkpointId || message.approval.checkpointId === checkpointId;
+      return matches && message.approval
+        ? { ...message, approval: { ...message.approval, checkpointId: message.approval.checkpointId || checkpointId, revision: checkpointRevision } }
+        : message;
+    }),
   })),
   updateTool: (tool) => set((state) => ({ toolRuns: [...state.toolRuns.filter((item) => item.callId !== tool.callId), tool] })),
   setApprovalDecision: (checkpointId, decisionStatus) => set((state) => ({
-    messages: state.messages.map((message) => message.approval?.checkpointId === checkpointId
-      ? { ...message, approval: { ...message.approval, decisionStatus } }
-      : message),
+    messages: state.messages.map((message) => {
+      const matches = checkpointId ? message.approval?.checkpointId === checkpointId : !!message.approval;
+      return matches && message.approval
+        ? { ...message, approval: { ...message.approval, decisionStatus } }
+        : message;
+    }),
   })),
   setToolApprovalDecision:(callId,decisionStatus)=>set((state)=>({messages:state.messages.map((message)=>message.toolApproval?.callId===callId?{...message,toolApproval:{...message.toolApproval,decisionStatus}}:message)})),
 }));

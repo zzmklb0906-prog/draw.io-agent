@@ -23,6 +23,8 @@ public class ApiExceptionHandler {
     public ResponseEntity<Response<Void>> invalid(IllegalArgumentException error){return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_JSON).body(Response.<Void>builder().code("ILLEGAL_PARAMETER").info(error.getMessage()).build());}
     @ExceptionHandler(AsyncRequestTimeoutException.class)
     public void asyncTimeout(AsyncRequestTimeoutException ignored){log.debug("异步响应已超时或完成，不再尝试写入 JSON 错误体");}
+    @ExceptionHandler(org.springframework.web.context.request.async.AsyncRequestNotUsableException.class)
+    public void asyncNotUsable(org.springframework.web.context.request.async.AsyncRequestNotUsableException ex){log.debug("客户端已提前关闭异步连接: {}",ex.getMessage());}
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Response<Void>> unexpected(Exception error){log.error("未处理的 API 异常",error);return ResponseEntity.internalServerError().contentType(MediaType.APPLICATION_JSON).body(Response.<Void>builder().code("INTERNAL_ERROR").info("服务暂时无法处理请求").build());}
     private HttpStatus status(String code){

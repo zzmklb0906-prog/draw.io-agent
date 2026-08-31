@@ -46,22 +46,26 @@ function ApprovalCard({ message, busy, onApprove, onRevise }: {
     await onRevise(approval, value);
   };
 
+  const scope = Array.isArray(approval.scope) ? approval.scope : [];
+  const assumptions = Array.isArray(approval.assumptions) ? approval.assumptions : [];
+  const questions = Array.isArray(approval.questions) ? approval.questions : [];
+
   return (
     <section className="approval-card" aria-label="绘图方案审核">
       <div className="approval-heading">
         <span>{statusLabel}</span>
-        <strong>{approval.title}</strong>
+        <strong>{approval.title || '绘图方案'}</strong>
       </div>
-      <p className="approval-prompt">{approval.rewrittenPrompt}</p>
+      <p className="approval-prompt">{approval.rewrittenPrompt || ''}</p>
       <dl className="approval-meta">
-        <div><dt>图表类型</dt><dd>{approval.diagramType}</dd></div>
-        {!!approval.scope.length && <div><dt>范围</dt><dd>{approval.scope.join(' · ')}</dd></div>}
+        <div><dt>图表类型</dt><dd>{approval.diagramType || '未指定'}</dd></div>
+        {!!scope.length && <div><dt>范围</dt><dd>{scope.join(' · ')}</dd></div>}
       </dl>
-      {!!approval.assumptions.length && (
-        <div className="approval-list"><strong>当前假设</strong><ul>{approval.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></div>
+      {!!assumptions.length && (
+        <div className="approval-list"><strong>当前假设</strong><ul>{assumptions.map((item, idx) => <li key={idx}>{typeof item === 'string' ? item : JSON.stringify(item)}</li>)}</ul></div>
       )}
-      {!!approval.questions.length && (
-        <div className="approval-list questions"><strong>需要确认</strong><ul>{approval.questions.map((item) => <li key={item}>{item}</li>)}</ul></div>
+      {!!questions.length && (
+        <div className="approval-list questions"><strong>需要确认</strong><ul>{questions.map((item, idx) => <li key={idx}>{typeof item === 'string' ? item : JSON.stringify(item)}</li>)}</ul></div>
       )}
       {editing && !handled && (
         <div className="approval-revision">
@@ -70,7 +74,7 @@ function ApprovalCard({ message, busy, onApprove, onRevise }: {
         </div>
       )}
       <div className="approval-actions">
-        <button className="button primary" disabled={busy || handled || !!approval.questions.length} onClick={() => void onApprove?.(approval)}>{decisionStatus === 'COMPLETED' ? '绘图已完成' : handled ? '方案已处理' : '确认并开始绘图'}</button>
+        <button className="button primary" disabled={busy || handled || !!questions.length} onClick={() => void onApprove?.(approval)}>{decisionStatus === 'COMPLETED' ? '绘图已完成' : handled ? '方案已处理' : '确认并开始绘图'}</button>
         <button className="button" disabled={busy || handled} onClick={() => setEditing((value) => !value)}>{handled ? '不可重复修改' : editing ? '收起修改' : '修改方案'}</button>
       </div>
     </section>

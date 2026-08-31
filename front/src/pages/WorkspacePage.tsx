@@ -221,8 +221,14 @@ export function WorkspacePage() {
       let toolApproval;
       if (message.type === 'APPROVAL' && message.contentJson) {
         try {
+          const parsed = JSON.parse(message.contentJson);
           approval = {
-            ...(JSON.parse(message.contentJson)),
+            ...parsed,
+            checkpointId: parsed.checkpointId || remote.checkpointId || conversation.checkpointId,
+            revision: parsed.revision ?? remote.checkpointRevision ?? conversation.checkpointRevision ?? 0,
+            scope: Array.isArray(parsed.scope) ? parsed.scope : [],
+            assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
+            questions: Array.isArray(parsed.questions) ? parsed.questions : [],
             decisionStatus: conversation.workflowStatus === 'WAITING_APPROVAL' ? 'PENDING' : 'COMPLETED',
           };
         } catch {
@@ -231,8 +237,11 @@ export function WorkspacePage() {
       }
       if (message.type === 'TOOL_APPROVAL' && message.contentJson) {
         try {
+          const parsedTool = JSON.parse(message.contentJson);
           toolApproval = {
-            ...(JSON.parse(message.contentJson)),
+            ...parsedTool,
+            checkpointId: parsedTool.checkpointId || remote.checkpointId || conversation.checkpointId,
+            revision: parsedTool.revision ?? remote.checkpointRevision ?? conversation.checkpointRevision ?? 0,
             decisionStatus: conversation.workflowStatus === 'WAITING_TOOL_APPROVAL' ? 'PENDING' : 'HANDLED',
           };
         } catch {
@@ -424,7 +433,31 @@ export function WorkspacePage() {
         </div>
         <section className={`chat-panel ${panel !== 'chat' ? 'mobile-hidden' : ''}`}>
           <div className="panel-heading"><div><p className="eyebrow">AGENT</p><h1>会话</h1></div><AgentProgress phase={chat.phase} status={chat.statusText} nodes={chat.nodeCount} edges={chat.edgeCount} /></div>
-          <MessageList messages={chat.messages} busy={!!chat.activeRequestId} onApprove={(approval) => send('', { checkpointId: approval.checkpointId, revision: approval.revision, decision: 'APPROVE' })} onRevise={(approval, revision) => send(revision, { checkpointId: approval.checkpointId, revision: approval.revision, decision: 'REVISE' })} onToolDecision={(approval,confirmed)=>{chat.setToolApprovalDecision(approval.callId,confirmed?'APPROVED':'DENIED');return send('',{checkpointId:approval.checkpointId,revision:approval.revision,decision:confirmed?'TOOL_APPROVE':'TOOL_DENY',toolCallId:approval.callId,confirmed,payload:{}});}} />
+          <MessageList
+            messages={chat.messages}
+            busy={!!chat.activeRequestId}
+            onApprove={(approval) => send('', {
+              checkpointId: approval.checkpointId || chat.checkpointId || '',
+              revision: approval.revision ?? chat.checkpointRevision ?? 0,
+              decision: 'APPROVE'
+            })}
+            onRevise={(approval, revision) => send(revision, {
+              checkpointId: approval.checkpointId || chat.checkpointId || '',
+              revision: approval.revision ?? chat.checkpointRevision ?? 0,
+              decision: 'REVISE'
+            })}
+            onToolDecision={(approval, confirmed) => {
+              chat.setToolApprovalDecision(approval.callId, confirmed ? 'APPROVED' : 'DENIED');
+              return send('', {
+                checkpointId: approval.checkpointId || chat.checkpointId || '',
+                revision: approval.revision ?? chat.checkpointRevision ?? 0,
+                decision: confirmed ? 'TOOL_APPROVE' : 'TOOL_DENY',
+                toolCallId: approval.callId,
+                confirmed,
+                payload: {}
+              });
+            }}
+          />
           <PromptComposer busy={!!chat.activeRequestId} disabled={!chat.agentId || agentsQuery.isError} canResume={chat.workflowStatus === 'PAUSED' && !!chat.checkpointId} onSend={send} onStop={stop} onResume={() => void send('', { checkpointId: chat.checkpointId, revision: chat.checkpointRevision, decision: 'CONTINUE' })} />
         </section>
         {isDrawAgent && <div className="panel-resizer" onPointerDown={(event)=>{const startX=event.clientX,start=chatWidth;let latest=start;const move=(e:PointerEvent)=>{latest=Math.max(360,Math.min(760,start+e.clientX-startX));setChatWidth(latest);};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);localStorage.setItem('chat-panel-width',String(latest));};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);}} />}

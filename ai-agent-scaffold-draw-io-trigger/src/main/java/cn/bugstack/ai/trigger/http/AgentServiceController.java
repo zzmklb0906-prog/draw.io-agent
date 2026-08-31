@@ -41,6 +41,7 @@ import cn.bugstack.ai.domain.agent.service.chat.CustomApiConfigManager;
 import org.apache.commons.lang3.StringUtils;
 import cn.bugstack.ai.trigger.http.auth.AuthenticatedUserContext;
 import cn.bugstack.ai.domain.conversation.adapter.IConversationRepository;
+import cn.bugstack.ai.domain.conversation.model.ConversationView;
 import cn.bugstack.ai.domain.agent.adapter.repository.IRuntimeObservationRepository;
 import cn.bugstack.ai.domain.agent.adapter.repository.IDynamicSubagentRepository;
 import cn.bugstack.ai.domain.artifact.adapter.IArtifactRepository;
@@ -484,8 +485,27 @@ public class AgentServiceController implements IAgentService {
             final WorkflowCheckpointEntity checkpoint;
             String effectiveMessage = requestDTO.getMessage();
             String entryAgentName = null;
-            if (StringUtils.isNotBlank(requestDTO.getCheckpointId())) {
-                WorkflowCheckpointEntity existingCheckpoint = workflowCheckpointService.get(requestDTO.getCheckpointId());
+            String checkpointId = requestDTO.getCheckpointId();
+            Long checkpointRevision = requestDTO.getCheckpointRevision();
+
+            // 安全兜底：如果前端传递了恢复决策(如 APPROVE/REVISE)但未携带 checkpointId，自动从当前会话关联中恢复
+            if (StringUtils.isBlank(checkpointId) && StringUtils.isNotBlank(requestDTO.getCheckpointDecision()) && StringUtils.isNotBlank(requestDTO.getConversationId())) {
+                try {
+                    Optional<ConversationView> convOpt = conversationRepository.get(requestDTO.getUserId(), UUID.fromString(requestDTO.getConversationId()));
+                    if (convOpt.isPresent() && StringUtils.isNotBlank(convOpt.get().checkpointId())) {
+                        checkpointId = convOpt.get().checkpointId();
+                        if (checkpointRevision == null || checkpointRevision <= 0) {
+                            checkpointRevision = convOpt.get().checkpointRevision();
+                        }
+                        log.info("从会话上下文自动恢复 Checkpoint: checkpointId={} revision={}", checkpointId, checkpointRevision);
+                    }
+                } catch (Exception ex) {
+                    log.warn("无法从会话上下文恢复 Checkpoint", ex);
+                }
+            }
+
+            if (StringUtils.isNotBlank(checkpointId)) {
+                WorkflowCheckpointEntity existingCheckpoint = workflowCheckpointService.get(checkpointId);
                 if (!finalSessionId.equals(existingCheckpoint.getSessionId()) || !requestDTO.getUserId().equals(existingCheckpoint.getUserId())) {
                     sessionExecutionGuard.release(executionLease.getAndSet(null));
                     throw new AppException("CHECKPOINT_OWNER_MISMATCH", "Checkpoint 与当前会话不匹配");
@@ -503,8 +523,8 @@ public class AgentServiceController implements IAgentService {
                     }
                 }
                 checkpoint = workflowCheckpointService.resume(
-                        requestDTO.getCheckpointId(),
-                        requestDTO.getCheckpointRevision() == null ? -1 : requestDTO.getCheckpointRevision(),
+                        checkpointId,
+                        checkpointRevision == null ? -1 : checkpointRevision,
                         requestDTO.getCheckpointDecision()
                 );
                 String decision = requestDTO.getCheckpointDecision();
@@ -1006,12 +1026,29 @@ public class AgentServiceController implements IAgentService {
             } catch (Exception ex) {
                 cancelTask.run();
                 try {
-                    emitter.completeWithError(ex);
+                    if (isClientAbort(ex)) {
+                        emitter.complete();
+                    } else {
+                        emitter.completeWithError(ex);
+                    }
                 } catch (Exception ignored) {}
             }
         }, 0, 250, TimeUnit.MILLISECONDS);
 
         return emitter;
+    }
+
+    private boolean isClientAbort(Throwable t) {
+        if (t == null) return false;
+        String name = t.getClass().getName();
+        String msg = t.getMessage() == null ? "" : t.getMessage();
+        if (name.contains("ClientAbortException") || name.contains("AsyncRequestNotUsableException")) {
+            return true;
+        }
+        if (msg.contains("中止了一个已建立的连接") || msg.contains("Connection reset") || msg.contains("Broken pipe")) {
+            return true;
+        }
+        return isClientAbort(t.getCause());
     }
 
     @GetMapping(value = {"chat_stream/active_run", "chat_stream/active"})
@@ -1077,9 +1114,11 @@ public class AgentServiceController implements IAgentService {
                     }
                     json.remove("rewedPrompt");
                     json.remove("rewritePrompt");
+                    json.put("checkpointId", checkpoint.getCheckpointId());
+                    json.put("revision", checkpoint.getRevision() + 1);
+                    json.put("checkpointStatus", WorkflowCheckpointService.WAITING_APPROVAL);
                     WorkflowCheckpointEntity saved = workflowCheckpointService.approval(checkpoint.getCheckpointId(), invocationId, json.toJSONString());
                     runtimeObservationRepository.workflowState(saved.getSessionId(), saved.getCheckpointId(), saved.getStatus());
-                    json.put("checkpointId", saved.getCheckpointId());
                     json.put("revision", saved.getRevision());
                     json.put("checkpointStatus", saved.getStatus());
                 }
